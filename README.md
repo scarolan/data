@@ -1,5 +1,7 @@
 # Data - a Bolt-JS Slack Chatbot
 
+![Lt. Commander Data and his cat, Spot](data_and_spot.png)
+
 ## Overview
 This is a ChatGPT-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to ChatGPT for messages that don't match a predefined pattern. You can customize the bot's personality and responses to suit your needs.
 
