@@ -80,21 +80,15 @@ async function generateImage(prompt) {
     console.log("Calling OpenAI API with parameters:", {
       prompt: prompt,
       n: 1,
-      size: '1024x1024',
-      response_format: 'b64_json',
-      model: 'dall-e-3',
-      quality: 'hd',
-      style: 'vivid'
+      size: "1024x1024",
+      model: "gpt-image-1"
     });
     
     const response = await openaiClient.images.generate({
       prompt,
       n: 1,
-      size: '1024x1024', // Default size
-      response_format: 'b64_json',
-      model: 'dall-e-3',   // Use the latest DALL-E 3 model
-      quality: 'hd',       // Use high definition quality
-      style: 'natural'       // More vibrant and dramatic style
+      size: '1024x1024',
+      model: 'gpt-image-1'
     });
     
     if (!response || !response.data || !response.data[0] || !response.data[0].b64_json) {
@@ -167,6 +161,11 @@ async function handleMessage(message, client = null, channel = null) {
     if (!message.text) {
       console.log("Received message with null or undefined text");
       return "I apologize, but I cannot process an empty message. How may I assist you?";
+    }
+    
+    // If the user asks about creating images, guide them to the /dalle command
+    if (message.text.match(/(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i)) {
+      return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
     }
     
     // Process the message with OpenAI
@@ -567,7 +566,7 @@ async function handleMessage(message, client = null, channel = null) {
         '',
         '# Slash commands:',
         '/askgpt <question> - Ask ChatGPT and get an ephemeral reply',
-        '/image <prompt>  - Generate an image with DALL·E',
+        '/dalle <prompt>    - Generate an image with DALL·E',
         '',
         `# Address the bot directly with @${process.env.SLACK_BOT_USER_NAME} syntax:`,
         `@${process.env.SLACK_BOT_USER_NAME} the rules - Explains Asimov's laws of robotics`,
@@ -673,44 +672,39 @@ async function handleMessage(message, client = null, channel = null) {
               throw new Error("Failed to generate image");
             }
             
-            // Try the legacy upload method first which might be more reliable
-            console.log("Uploading image to Slack using legacy upload method");
+            // Use the recommended uploadV2 method first for better stability
+            console.log("Uploading image to Slack using uploadV2 method");
             try {
-              const uploadResult = await app.client.files.upload({
+              const uploadV2Result = await app.client.files.uploadV2({
                 token: process.env.SLACK_BOT_TOKEN,
-                channels: message.channel,
+                channel_id: message.channel,
                 file: imageBuffer,
                 filename: 'dalle-image.png',
                 title: prompt,
                 initial_comment: `Here's the DALL·E image for: "${prompt}"`,
               });
               
-              console.log("Image upload successful:", uploadResult.file.id);
-            } catch (uploadError) {
-              console.error("Error with legacy upload method:", uploadError);
+              // The V2 API returns a different structure
+              console.log("Image upload successful with uploadV2, result:", JSON.stringify(uploadV2Result, null, 2));
+            } catch (uploadV2Error) {
+              console.error("Error with uploadV2 method:", uploadV2Error);
               
-              // If legacy method fails, try uploadV2 as a fallback
-              console.log("Legacy upload failed, trying uploadV2 as fallback");
+              // If uploadV2 fails, try the legacy method as a fallback
+              console.log("uploadV2 failed, trying legacy upload as fallback");
               try {
-                const uploadV2Result = await app.client.files.uploadV2({
+                const uploadResult = await app.client.files.upload({
                   token: process.env.SLACK_BOT_TOKEN,
-                  channel_id: message.channel,
+                  channels: message.channel,
                   file: imageBuffer,
                   filename: 'dalle-image.png',
                   title: prompt,
+                  initial_comment: `Here's the DALL·E image for: "${prompt}"`,
                 });
                 
-                // If successful, post a comment about the image
-                await app.client.chat.postMessage({
-                  token: process.env.SLACK_BOT_TOKEN,
-                  channel: message.channel,
-                  text: `Here's the DALL·E image for: "${prompt}"`
-                });
-                
-                console.log("uploadV2 image upload successful:", uploadV2Result.file.id);
-              } catch (uploadV2Error) {
-                console.error("Both upload methods failed:", uploadV2Error);
-                await say(`I generated the image but had trouble uploading it: ${uploadError.message}`);
+                console.log("Legacy image upload successful:", uploadResult.file.id);
+              } catch (uploadError) {
+                console.error("Both upload methods failed:", uploadError);
+                await say(`I generated the image but had trouble uploading it: ${uploadV2Error.message}`);
               }
             }
             
@@ -966,47 +960,41 @@ async function handleMessage(message, client = null, channel = null) {
           console.log("Posting image to channel directly:", command.channel_id);
           
           try {
-            // Try the legacy upload method first with explicit content_type
-            console.log("Attempting legacy file upload to channel:", command.channel_id);
-            const uploadResult = await client.files.upload({
+            // Use the recommended uploadV2 method first
+            console.log("Attempting uploadV2 file upload to channel:", command.channel_id);
+            const uploadV2Result = await client.files.uploadV2({
               token: process.env.SLACK_BOT_TOKEN,
-              channels: command.channel_id,
+              channel_id: command.channel_id,
               file: imageBuffer,
               filename: 'dalle-image.png',
-              filetype: 'png',
               title: prompt,
               initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+              alt_text: `DALL-E generated image for: ${prompt}`,
             });
             
-            console.log("Image upload successful:", uploadResult.file.id);
-          } catch (uploadError) {
-            console.error("Error with legacy upload:", uploadError);
-            console.error("Full error details:", JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
+            // The V2 API returns a different structure 
+            console.log("V2 upload successful, result:", JSON.stringify(uploadV2Result, null, 2));
+          } catch (uploadV2Error) {
+            console.error("Error with uploadV2:", uploadV2Error);
+            console.error("V2 error details:", JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
             
             try {
-              // Try the V2 upload as fallback with more specific details
-              console.log("Attempting V2 file upload to channel:", command.channel_id);
-              const uploadV2Result = await client.files.uploadV2({
+              // Try the legacy upload method as fallback
+              console.log("Attempting legacy file upload to channel:", command.channel_id);
+              const uploadResult = await client.files.upload({
                 token: process.env.SLACK_BOT_TOKEN,
-                channel_id: command.channel_id,
+                channels: command.channel_id,
                 file: imageBuffer,
                 filename: 'dalle-image.png',
+                filetype: 'png',
                 title: prompt,
                 initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-                alt_text: `DALL-E generated image for: ${prompt}`,
               });
               
-              // If upload succeeded, post a follow-up message
-              await client.chat.postMessage({
-                token: process.env.SLACK_BOT_TOKEN,
-                channel: command.channel_id,
-                text: `Here's the DALL·E image for: "${prompt}"`
-              });
-              
-              console.log("V2 upload successful:", uploadV2Result.file.id);
-            } catch (uploadV2Error) {
-              console.error("Both upload methods failed:", uploadV2Error);
-              console.error("V2 error details:", JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+              console.log("Legacy image upload successful:", uploadResult.file.id);
+            } catch (uploadError) {
+              console.error("Both upload methods failed:", uploadError);
+              console.error("Full error details:", JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
               
               // Final fallback: try posting a direct message
               try {

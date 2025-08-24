@@ -1,7 +1,7 @@
 {
-  "name": "eve-bolt-js-slack-chatbot",
+  "name": "data-bolt-js-slack-chatbot",
   "version": "2.1.0",
-  "description": "Eve - a BoltJS powered Slack Chatbot",
+  "description": "Data - a BoltJS powered Slack Chatbot",
   "main": "app.js",
   "type": "module",
   "scripts": {
@@ -10,11 +10,11 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@keyv/redis": "^2.8.5",
-    "@slack/bolt": "^3.16.0",
+    "@keyv/redis": "^5.1.1",
+    "@slack/bolt": "^3.17.1",
     "chatgpt": "^5.2.5",
-    "keyv": "^4.5.4",
+    "keyv": "^5.5.0",
     "node-fetch": "^3.3.2",
-    "openai": "^4.20.1"
+    "openai": "^4.28.0"
   }
 }
