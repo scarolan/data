@@ -1,5 +1,5 @@
 display_information:
-  name: Data - a Bolt-JS Slack Chatbot
+  name: Data
 features:
   app_home:
     home_tab_enabled: false
@@ -9,10 +9,6 @@ features:
     display_name: Data
     always_online: true
   slash_commands:
-    - command: /askgpt
-      description: Ask ChatGPT a question
-      usage_hint: "<question>"
-      should_escape: false
     - command: /dalle
       description: Generate an image with DALL-E
       usage_hint: "<prompt>"

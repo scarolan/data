@@ -85,21 +85,19 @@ npm run start
 
 ### 4. Test
 Go to the installed workspace and type **help** in a DM to your new bot.
-You can also use the new `/askgpt` slash command in any channel:
+Use direct mentions or the `/dalle` slash command for functionality:
+
+Direct mention example (in a channel or DM):
 
 ```text
-/askgpt what is the weather today?
+@Data help
+@Data image a cat riding a skateboard
 ```
-You can also generate images using the `/dalle` slash command:
+
+Slash command example (image generation):
 
 ```text
 /dalle a cute robot
-```
-
-You can also generate images with the `/image` command:
-
-```text
-/image a cat riding a skateboard
 ```
 
 ### 5. Deploy to production
