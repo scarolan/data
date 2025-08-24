@@ -867,72 +867,7 @@ async function handleMessage(message, client = null, channel = null) {
     }
   });
 
-  // Slash command to query ChatGPT directly
-  app.command('/askgpt', async ({ command, ack, respond, client }) => {
-    try {
-      // Acknowledge the command request first - this shows the "working" state in Slack
-      await ack();
-      
-      // Check if the command text is empty
-      if (!command.text || command.text.trim() === '') {
-        await respond({
-          text: "I apologize, but I require a question to generate a response. Please provide a question after the /askgpt command.",
-          response_type: 'ephemeral'
-        });
-        return;
-      }
-      
-      // Send an initial progress message
-      const progressMsg = await respond({
-        text: `Thinking about your question...`,
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `:brain: *Thinking about your question...*`
-            }
-          },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `> ${command.text}`
-            }
-          },
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: thinkingMessage.replace(":brain:", ":hourglass_flowing_sand:")
-              }
-            ]
-          }
-        ],
-        response_type: 'ephemeral'
-      });
-      
-      // Get the response from OpenAI
-      const responseText = await handleMessage({ text: command.text, user: command.user_id });
-      
-      // Send the response once ready
-      await respond({ 
-        text: responseText,
-        response_type: 'ephemeral',
-        replace_original: true
-      });
-    } catch (error) {
-      console.error("Error in /askgpt command:", error);
-      
-      // Send an error message
-      await respond({ 
-        text: "I apologize, but I encountered an error while processing your request. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.",
-        response_type: 'ephemeral',
-        replace_original: true
-      });
-    }
-  });
+  // The /askgpt slash command has been removed. Use direct mentions or other slash commands (for example, /dalle for images).
 
   // Slash command to generate an image with DALL-E
   app.command('/dalle', async ({ command, ack, respond, client, context }) => {
