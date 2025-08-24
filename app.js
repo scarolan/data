@@ -45,14 +45,29 @@ const app = new App({
   //logLevel: LogLevel.DEBUG,
 });
 
-//Create a redis namespace for the bot's memory
+// Create a redis namespace for the bot's memory
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
+
+// Allow TTL and MAX keys to be configured via environment variables
+// MEMORY_TTL_HOURS - how long (in hours) keys should live in Redis (default 24)
+// MEMORY_MAX_KEYS - advisory maximum number of keys we expect to store (default 10000)
+const memoryTtlHours = parseInt(process.env.MEMORY_TTL_HOURS || '24', 10);
+const memoryMaxKeys = parseInt(process.env.MEMORY_MAX_KEYS || '10000', 10);
+const memoryTtlSeconds = Math.max(60, memoryTtlHours * 60 * 60);
+
 const store = new KeyvRedis(redisUrl, {
   namespace: 'chatgpt-slackbot',
-  ttl: 60 * 60 * 24,
-  max: 10000,
+  // KeyvRedis accepts a ttl value in seconds in this codebase; keep using 'ttl' for compatibility
+  ttl: memoryTtlSeconds,
+  // Max is advisory; KeyvRedis may expose it to its internal cache implementation
+  max: memoryMaxKeys,
 });
 const messageStore = new Keyv({ store, namespace: 'chatgpt-slackbot' });
+
+console.log(`Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`);
+
+// Redis health checks intentionally removed — bot relies on runtime errors and external monitoring
+// If you want an internal health probe later, we can re-add a minimal check that suits your monitoring strategy.
 
 // Create a new instance of the ChatGPTAPI client
 const openai_api = new ChatGPTAPI({
@@ -683,14 +698,46 @@ async function handleMessage(message, client = null, channel = null) {
                 title: prompt,
                 initial_comment: `Here's the DALL·E image for: "${prompt}"`,
               });
-              
-              // The V2 API returns a different structure
-              console.log("Image upload successful with uploadV2, result:", JSON.stringify(uploadV2Result, null, 2));
+
+              // uploadV2 can return different shapes depending on SDK/version.
+              // Try to extract a file id in a few common places.
+              let uploadedFileId = null;
+              try {
+                // Common V2 response: { file: { id: 'F123' } } or { file: { file: { id: 'F123' } } }
+                if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
+                  uploadedFileId = uploadV2Result.file.id;
+                } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
+                  uploadedFileId = uploadV2Result.file.file.id;
+                } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
+                  if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
+                    uploadedFileId = uploadV2Result.files[0].id;
+                  } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
+                    uploadedFileId = uploadV2Result.files[0].files[0].id;
+                  }
+                }
+              } catch (extractErr) {
+                console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
+              }
+
+              if (uploadedFileId) {
+                console.log('Image uploaded with uploadV2, file id:', uploadedFileId);
+              } else {
+                // If uploadV2 succeeded (no exception) but we couldn't extract an id, do not re-upload
+                // to avoid creating duplicate images. Log full response for debugging and provide a user-facing fallback.
+                console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
+                console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
+                try {
+                  await say(`I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`);
+                } catch (notifyErr) {
+                  console.warn('Failed to notify user about unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
+                }
+              }
             } catch (uploadV2Error) {
-              console.error("Error with uploadV2 method:", uploadV2Error);
-              
+              console.error('Error with uploadV2 method:', uploadV2Error);
+              console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+
               // If uploadV2 fails, try the legacy method as a fallback
-              console.log("uploadV2 failed, trying legacy upload as fallback");
+              console.log('uploadV2 failed, trying legacy upload as fallback');
               try {
                 const uploadResult = await app.client.files.upload({
                   token: process.env.SLACK_BOT_TOKEN,
@@ -700,11 +747,11 @@ async function handleMessage(message, client = null, channel = null) {
                   title: prompt,
                   initial_comment: `Here's the DALL·E image for: "${prompt}"`,
                 });
-                
-                console.log("Legacy image upload successful:", uploadResult.file.id);
+
+                console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
               } catch (uploadError) {
-                console.error("Both upload methods failed:", uploadError);
-                await say(`I generated the image but had trouble uploading it: ${uploadV2Error.message}`);
+                console.error('Both upload methods failed:', uploadError);
+                await say(`I generated the image but had trouble uploading it: ${uploadV2Error && uploadV2Error.message ? uploadV2Error.message : uploadError.message}`);
               }
             }
             
@@ -959,66 +1006,97 @@ async function handleMessage(message, client = null, channel = null) {
           // This approach is more reliable for file uploads with slash commands
           console.log("Posting image to channel directly:", command.channel_id);
           
-          try {
-            // Use the recommended uploadV2 method first
-            console.log("Attempting uploadV2 file upload to channel:", command.channel_id);
-            const uploadV2Result = await client.files.uploadV2({
-              token: process.env.SLACK_BOT_TOKEN,
-              channel_id: command.channel_id,
-              file: imageBuffer,
-              filename: 'dalle-image.png',
-              title: prompt,
-              initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-              alt_text: `DALL-E generated image for: ${prompt}`,
-            });
-            
-            // The V2 API returns a different structure 
-            console.log("V2 upload successful, result:", JSON.stringify(uploadV2Result, null, 2));
-          } catch (uploadV2Error) {
-            console.error("Error with uploadV2:", uploadV2Error);
-            console.error("V2 error details:", JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
-            
             try {
-              // Try the legacy upload method as fallback
-              console.log("Attempting legacy file upload to channel:", command.channel_id);
-              const uploadResult = await client.files.upload({
+              // Use the recommended uploadV2 method first
+              console.log('Attempting uploadV2 file upload to channel:', command.channel_id);
+              const uploadV2Result = await client.files.uploadV2({
                 token: process.env.SLACK_BOT_TOKEN,
-                channels: command.channel_id,
+                channel_id: command.channel_id,
                 file: imageBuffer,
                 filename: 'dalle-image.png',
-                filetype: 'png',
                 title: prompt,
                 initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+                alt_text: `DALL-E generated image for: ${prompt}`,
               });
-              
-              console.log("Legacy image upload successful:", uploadResult.file.id);
-            } catch (uploadError) {
-              console.error("Both upload methods failed:", uploadError);
-              console.error("Full error details:", JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
-              
-              // Final fallback: try posting a direct message
+
+              // Try to extract file id defensively from common shapes
+              let uploadedFileId = null;
               try {
-                console.log("Attempting to post image using chat.postMessage");
-                
-                await client.chat.postMessage({
+                if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
+                  uploadedFileId = uploadV2Result.file.id;
+                } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
+                  uploadedFileId = uploadV2Result.file.file.id;
+                } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
+                  if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
+                    uploadedFileId = uploadV2Result.files[0].id;
+                  } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
+                    uploadedFileId = uploadV2Result.files[0].files[0].id;
+                  }
+                }
+              } catch (extractErr) {
+                console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
+              }
+
+              if (uploadedFileId) {
+                console.log('V2 upload successful, file id:', uploadedFileId);
+              } else {
+                console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
+                console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
+                try {
+                  await respond({
+                    text: `I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`,
+                    response_type: 'ephemeral',
+                    replace_original: false
+                  });
+                } catch (notifyErr) {
+                  console.warn('Failed to send fallback response to user after unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
+                }
+              }
+            } catch (uploadV2Error) {
+              console.error('Error with uploadV2:', uploadV2Error);
+              console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+
+              try {
+                // Try the legacy upload method as fallback
+                console.log('Attempting legacy file upload to channel:', command.channel_id);
+                const uploadResult = await client.files.upload({
                   token: process.env.SLACK_BOT_TOKEN,
-                  channel: command.channel_id,
-                  text: `Here's the DALL·E image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
+                  channels: command.channel_id,
+                  file: imageBuffer,
+                  filename: 'dalle-image.png',
+                  filetype: 'png',
+                  title: prompt,
+                  initial_comment: `Here's the DALL·E image for: "${prompt}"`,
                 });
-                
-                console.log("Posted fallback message about the image");
-              } catch (msgError) {
-                console.error("All posting methods failed:", msgError);
-                
-                // Let the user know the upload failed even though generation worked
-                await respond({
-                  text: `:warning: Generated image for "${prompt}" but failed to upload it. Please check server logs for details.`,
-                  response_type: 'ephemeral',
-                  replace_original: false
-                });
+
+                console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
+              } catch (uploadError) {
+                console.error('Both upload methods failed:', uploadError);
+                console.error('Full error details:', JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
+
+                // Final fallback: try posting a direct message
+                try {
+                  console.log('Attempting to post image using chat.postMessage');
+
+                  await client.chat.postMessage({
+                    token: process.env.SLACK_BOT_TOKEN,
+                    channel: command.channel_id,
+                    text: `Here's the DALL·E image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
+                  });
+
+                  console.log('Posted fallback message about the image');
+                } catch (msgError) {
+                  console.error('All posting methods failed:', msgError);
+
+                  // Let the user know the upload failed even though generation worked
+                  await respond({
+                    text: `:warning: Generated image for "${prompt}" but failed to upload it. Please check server logs for details.`,
+                    response_type: 'ephemeral',
+                    replace_original: false
+                  });
+                }
               }
             }
-          }
         } catch (error) {
           console.error("Error in async image generation:", error);
           

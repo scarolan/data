@@ -1,7 +1,7 @@
 # Data - a Bolt-JS Slack Chatbot
 
 ## Overview
-This is a ChatGPT-powered Slack chatbot built on the Bolt JS framework. The bot comes with support for canned responses and will fall back to ChatGPT for any messages you haven't defined a match for. You can customize the bot's personality and responses however you wish!
+This is a ChatGPT-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to ChatGPT for messages that don't match a predefined pattern. You can customize the bot's personality and responses to suit your needs.
 
 ## Prerequisites
 You will need a local Redis installation to persist the bot's conversation memory. You can install Redis server on Ubuntu like this:
@@ -58,7 +58,7 @@ npm start
 
 ```zsh
 # Clone this project onto your machine
-git clone https://github.com/scarolan/eve.git
+git clone https://github.com/scarolan/data.git
 ```
 
 The bot's personality is now configurable via the BOT_PERSONALITY environment variable. You can set this in your script or directly in your environment:
@@ -68,11 +68,11 @@ The bot's personality is now configurable via the BOT_PERSONALITY environment va
 export BOT_PERSONALITY="You are a helpful assistant with a cheerful disposition. You love to tell jokes and answer questions clearly and concisely."
 ```
 
-If you don't set the BOT_PERSONALITY variable, the bot will use a default Data from Star Trek personality.
+If you don't set the BOT_PERSONALITY variable, the bot will use a default Star Trek "Data" personality.
 
 ```zsh
 # Change into the project
-cd eve
+cd data
 
 # Install the dependencies
 npm install
