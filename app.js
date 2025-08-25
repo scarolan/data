@@ -33,7 +33,7 @@ import { ChatGPTAPI } from 'chatgpt';
 import OpenAI from 'openai';
 import Keyv from 'keyv';
 import KeyvRedis from '@keyv/redis';
-import fetch, { FormData } from 'node-fetch';
+import fetch from 'node-fetch';
 //Uncomment this and the logLevel below to enable DEBUG
 //import { LogLevel } from '@slack/bolt';
 
@@ -66,9 +66,6 @@ const messageStore = new Keyv({ store, namespace: 'chatgpt-slackbot' });
 
 console.log(`Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`);
 
-// Redis health checks intentionally removed — bot relies on runtime errors and external monitoring
-// If you want an internal health probe later, we can re-add a minimal check that suits your monitoring strategy.
-
 // Create a new instance of the ChatGPTAPI client
 const openai_api = new ChatGPTAPI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -84,43 +81,44 @@ const openaiClient = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// Function to generate an image with DALL-E (model: gpt-image-1)
 async function generateImage(prompt) {
   try {
     console.log(`Generating DALL-E image with prompt: "${prompt}"`);
-    
+
     if (!prompt || prompt.trim() === '') {
       throw new Error('Empty prompt provided for image generation');
     }
-    
+
     console.log("Calling OpenAI API with parameters:", {
       prompt: prompt,
       n: 1,
       size: "1024x1024",
       model: "gpt-image-1"
     });
-    
+
     const response = await openaiClient.images.generate({
       prompt,
       n: 1,
       size: '1024x1024',
       model: 'gpt-image-1'
     });
-    
+
     if (!response || !response.data || !response.data[0] || !response.data[0].b64_json) {
       console.error('Invalid response from OpenAI:', JSON.stringify(response));
       throw new Error('Received invalid response from image generation API');
     }
-    
+
     // Convert to buffer and log size information
     const imageBuffer = Buffer.from(response.data[0].b64_json, 'base64');
     const fileSizeKB = (imageBuffer.length / 1024).toFixed(2);
     console.log(`Image generated successfully, size: ${fileSizeKB}KB`);
-    
+
     // Warn if image size is large
     if (imageBuffer.length > 5 * 1024 * 1024) {
       console.warn(`WARNING: Generated image is very large (${fileSizeKB}KB), may exceed Slack limits`);
     }
-    
+
     return imageBuffer;
   } catch (error) {
     console.error('Error generating image:', error);
@@ -138,51 +136,24 @@ async function generateImage(prompt) {
 // Use this map to track the parent message ids for each user
 const userParentMessageIds = new Map();
 
-// Function to generate a caption for an image using an external API
-async function getImageCaption(imageBuffer) {
-  try {
-    const form = new FormData();
-    form.append('image', imageBuffer, 'image.jpg');
-    const res = await fetch('https://api.deepai.org/api/densecap', {
-      method: 'POST',
-      headers: { 'api-key': process.env.DEEPAI_API_KEY || '' },
-      body: form,
-    });
-    const data = await res.json();
-    return data?.output?.captions?.[0]?.caption || 'I could not describe that image.';
-  } catch (error) {
-    console.error('Image captioning failed:', error);
-    return 'I encountered an error trying to describe that image.';
-  }
-}
-
-// Download an image from Slack and caption it
-async function captionSlackImage(file) {
-  const response = await fetch(file.url_private, {
-    headers: { Authorization: `Bearer ${process.env.SLACK_BOT_TOKEN}` },
-  });
-  const buffer = Buffer.from(await response.arrayBuffer());
-  return await getImageCaption(buffer);
-}
-
 // Function to handle messages and map them to their parent ids
 // This is how the bot is able to remember previous conversations
 async function handleMessage(message, client = null, channel = null) {
   let response;
   const userId = message.user;
-  
+
   try {
     // Check if message.text is null or undefined
     if (!message.text) {
       console.log("Received message with null or undefined text");
       return "I apologize, but I cannot process an empty message. How may I assist you?";
     }
-    
+
     // If the user asks about creating images, guide them to the /dalle command
     if (message.text.match(/(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i)) {
       return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
     }
-    
+
     // Process the message with OpenAI
     if (!userParentMessageIds.has(userId)) {
       // send the first message without a parentMessageId
@@ -200,73 +171,90 @@ async function handleMessage(message, client = null, channel = null) {
     return response.text;
   } catch (error) {
     console.error("Error in handleMessage:", error);
-    
+
     // Check if it's an OpenAI API error
     if (error.statusCode === 400 && error.message.includes("content")) {
       return "I apologize, but I encountered an issue processing your message. Could you please rephrase your request?";
     }
-    
+
     // Generic error message for other issues
     return "I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.";
   }
 }
 
-// The functional code for your bot is below:
+// Helper: post a consistent "thinking" message with the configured context text
+// Defaults the visible text to the environment-configurable `THINKING_MESSAGE`
+async function postThinking(say, visibleText = thinkingMessage) {
+  try {
+    return await say({
+      text: visibleText,
+      blocks: [
+        {
+          type: "context",
+          elements: [
+            {
+              type: "mrkdwn",
+              text: thinkingMessage
+            }
+          ]
+        }
+      ]
+    });
+  } catch (err) {
+    console.warn("Failed to post thinking message:", err && err.message ? err.message : err);
+    return null;
+  }
+}
 
+// Helper: safely delete a thinking message
+async function clearThinking(channel, ts) {
+  if (!ts) return;
+  try {
+    await app.client.chat.delete({ channel, ts });
+  } catch (err) {
+    console.log("Error deleting thinking message:", err && err.message ? err.message : err);
+  }
+}
+
+// The functional code for your bot is below:
 (async () => {
 
-  // When a file is shared, check if it's an image and provide a caption
-  app.event('file_shared', async ({ event, client, context }) => {
-    try {
-      const info = await client.files.info({ file: event.file_id });
-      const file = info.file;
-      if (file.mimetype && file.mimetype.startsWith('image/')) {
-        const caption = await captionSlackImage(file);
-        await client.chat.postMessage({
-          channel: event.channel_id,
-          text: `Image description: ${caption}`,
-        });
-      }
-    } catch (error) {
-      console.error('Error processing shared file:', error);
-    }
-  });
-
+  // Listens to all messages in channels the bot is a member of
   app.message(async ({ message, say, context }) => {
-  ///////////////////////////////////////////////////////////////
-  // This listener is the equivalent of Hubot's 'hear' method.
-  // It watches all messages and filters for phrases that match.
-  // These phrases do not require an @botname to be triggered.
-  // Use these sparingly and be sure your match is not too broad.
-  ///////////////////////////////////////////////////////////////
-    
+    ///////////////////////////////////////////////////////////////
+    // This listener is the equivalent of Hubot's 'hear' method.
+    // It watches all messages and filters for phrases that match.
+    // These phrases do not require an @botname to be triggered.
+    // Use these sparingly and be sure your match is not too broad.
+    ///////////////////////////////////////////////////////////////
+
     // Safeguard against undefined messages
     if (!message) {
       console.log("Received undefined message");
       return;
     }
-    
+
     // Skip if this is a direct mention, we'll handle those separately
     // to avoid duplicate responses
     if (context.botUserId && message.text && message.text.includes(`<@${context.botUserId}>`)) {
       console.log("Skipping direct mention in general handler");
       return;
     }
-    
+
     // Skip message changed/deleted events and other special types
     if (message.subtype) {
       console.log(`Skipping message with subtype: ${message.subtype}`);
       return;
     }
-    
+
     // Skip bot messages
     if (message.bot_id) {
       console.log("Skipping message from a bot");
       return;
     }
-    
+
     // Log message for debugging
-    console.log("Processing message:", { 
+    console.log("Processing message:", {
       channel_type: message.channel_type,
       has_text: !!message.text,
       text_length: message.text ? message.text.length : 0,
@@ -274,17 +262,6 @@ async function handleMessage(message, client = null, channel = null) {
       has_attachments: !!message.attachments,
       user: message.user
     });
-
-    // If the message contains image files, caption them
-    if (message.files && message.files.length > 0) {
-      for (const file of message.files) {
-        if (file.mimetype && file.mimetype.startsWith('image/')) {
-          const caption = await captionSlackImage(file);
-          await say(`Image description: ${caption}`);
-        }
-      }
-      return;
-    }
 
     // Responds any message containing 'i love you' with 'i know'
     if (message.text && message.text.match(/i love you/i)) {
@@ -393,72 +370,45 @@ async function handleMessage(message, client = null, channel = null) {
         console.log("Message object:", JSON.stringify(message, null, 2));
         return; // Just silently ignore empty messages, don't respond
       }
-      
+
       // Skip messages from bots
       if (message.bot_id) {
         console.log("Skipping message from a bot in DM");
         return;
       }
-      
+
       // Skip edited messages, thread replies, or messages that are clearly system events
       if (message.edited || message.subtype) {
         console.log("Skipping edited or special message in DM");
         return;
       }
-      
+
       // Log the full message for debugging
       console.log("Processing DM message:", JSON.stringify(message, null, 2));
 
       // For better UX, let the user know we're processing their message
       let thinking = null;
       try {
-        thinking = await say({
-          text: "Thinking about your message...",
-          blocks: [
-            {
-              type: "context",
-              elements: [
-                {
-                  type: "mrkdwn",
-                  text: thinkingMessage
-                }
-              ]
-            }
-          ]
-        });
-      
+        thinking = await postThinking(say);
+
         // Get response from OpenAI
         const responseText = await handleMessage(message);
-        
+
         // Delete the thinking message
         if (thinking && thinking.ts) {
-          try {
-            await app.client.chat.delete({
-              channel: message.channel,
-              ts: thinking.ts
-            });
-          } catch (error) {
-            console.log("Error deleting thinking message:", error.message);
-          }
+          await clearThinking(message.channel, thinking.ts);
         }
-        
+
         // Send the actual response
         await say(responseText);
       } catch (error) {
         console.error("Error in DM message processing:", error);
-        
+
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
-          try {
-            await app.client.chat.delete({
-              channel: message.channel,
-              ts: thinking.ts
-            });
-          } catch (deleteError) {
-            console.log("Error deleting thinking message:", deleteError.message);
-          }
+          await clearThinking(message.channel, thinking.ts);
         }
-        
+
         // Send an error message to the user
         await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
       }
@@ -471,100 +421,74 @@ async function handleMessage(message, client = null, channel = null) {
         console.log("Ignoring message from a bot in MPIM");
         return;
       }
-      
+
       // Validate message text before proceeding
       if (!message.text || message.text.trim() === '') {
         console.log("Received empty message in MPIM");
         console.log("Message object:", JSON.stringify(message, null, 2));
         return; // Just silently ignore empty messages, don't respond
       }
-      
+
       // Skip edited messages or system messages
       if (message.edited || message.subtype) {
         console.log("Skipping edited or special message in MPIM");
         return;
       }
-      
+
       // Log the full message for debugging
       console.log("Processing MPIM message:", JSON.stringify(message, null, 2));
-      
+
       // For better UX, let the user know we're processing their message
       let thinking = null;
       try {
-        thinking = await say({
-          text: "Thinking about your message...",
-          blocks: [
-            {
-              type: "context",
-              elements: [
-                {
-                  type: "mrkdwn",
-                  text: thinkingMessage
-                }
-              ]
-            }
-          ]
-        });
-        
+        thinking = await postThinking(say);
+
         // Get response from OpenAI
         const responseText = await handleMessage(message);
-        
+
         // Delete the thinking message
         if (thinking && thinking.ts) {
-          try {
-            await app.client.chat.delete({
-              channel: message.channel,
-              ts: thinking.ts
-            });
-          } catch (error) {
-            console.log("Error deleting thinking message:", error.message);
-          }
+          await clearThinking(message.channel, thinking.ts);
         }
-        
+
         // Send the actual response
         await say(responseText);
       } catch (error) {
         console.error("Error in MPIM message processing:", error);
-        
+
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
-          try {
-            await app.client.chat.delete({
-              channel: message.channel,
-              ts: thinking.ts
-            });
-          } catch (deleteError) {
-            console.log("Error deleting thinking message:", deleteError.message);
-          }
+          await clearThinking(message.channel, thinking.ts);
         }
-        
+
         // Send an error message to the user
         await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
       }
     }
   });
-
+  
+  // Listens for @botname direct mentions
   app.message(directMention(), async ({ message, say }) => {
-  ///////////////////////////////////////////////////////////////
-  // This section is like the 'respond' method in Hubot.
-  // Address the bot directly with @botname for it to respond.
-  // For example: @botname help
-  ///////////////////////////////////////////////////////////////
-    
+    ///////////////////////////////////////////////////////////////
+    // This section is like the 'respond' method in Hubot.
+    // Address the bot directly with @botname for it to respond.
+    // For example: @botname help
+    ///////////////////////////////////////////////////////////////
+
     // Safeguard against undefined messages
     if (!message) {
       console.log("Received undefined direct mention message");
       return;
     }
-    
+
     // Skip message changed/deleted events and other special types
     if (message.subtype) {
       console.log(`Skipping direct mention with subtype: ${message.subtype}`);
       return;
     }
-    
+
     // Log direct mention for debugging
-    console.log("Processing direct mention:", { 
+    console.log("Processing direct mention:", {
       channel_type: message.channel_type,
       has_text: !!message.text,
       text_length: message.text ? message.text.length : 0,
@@ -576,7 +500,7 @@ async function handleMessage(message, client = null, channel = null) {
       const commandsList = [
         `# Trigger words that work without @${process.env.SLACK_BOT_USER_NAME}`,
         'danceparty - Random emoji dance party',
-        'tiktok     - Wake up in the morning feeling like P Diddy',
+        'tiktok     - Wake up in the morning feeling like a party...',
         'rickroll   - Never gonna give you up, never gonna let you down.',
         '',
         '# Slash commands:',
@@ -634,166 +558,6 @@ async function handleMessage(message, client = null, channel = null) {
       return;
     };
 
-    // Generate an image with DALL·E
-    const imageMatch = message.text ? message.text.match(/^image\s+(.+)/i) : null;
-    if (imageMatch) {
-      try {
-        const prompt = imageMatch[1];
-        console.log("Processing direct mention image request:", prompt);
-        
-        if (!prompt || prompt.trim() === '') {
-          await say("I need a description to generate an image. Please provide more details.");
-          return;
-        }
-        
-        // Let users know image generation is in progress with a more detailed message
-        const thinkingMsg = await say({
-          text: `Generating image with DALL·E: ${prompt}`,
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: `:art: *Generating image with DALL·E*`
-              }
-            },
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: `> ${prompt}`
-              }
-            },
-            {
-              type: "context",
-              elements: [
-                {
-                  type: "mrkdwn",
-                  text: ":hourglass_flowing_sand: _This may take a few moments..._"
-                }
-              ]
-            }
-          ]
-        });
-        
-        // Generate the image in a separate process to avoid blocking
-        setTimeout(async () => {
-          try {
-            // Generate the image
-            console.log("Calling OpenAI API for image generation");
-            const imageBuffer = await generateImage(prompt);
-            
-            if (!imageBuffer) {
-              throw new Error("Failed to generate image");
-            }
-            
-            // Use the recommended uploadV2 method first for better stability
-            console.log("Uploading image to Slack using uploadV2 method");
-            try {
-              const uploadV2Result = await app.client.files.uploadV2({
-                token: process.env.SLACK_BOT_TOKEN,
-                channel_id: message.channel,
-                file: imageBuffer,
-                filename: 'dalle-image.png',
-                title: prompt,
-                initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-              });
-
-              // uploadV2 can return different shapes depending on SDK/version.
-              // Try to extract a file id in a few common places.
-              let uploadedFileId = null;
-              try {
-                // Common V2 response: { file: { id: 'F123' } } or { file: { file: { id: 'F123' } } }
-                if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
-                  uploadedFileId = uploadV2Result.file.id;
-                } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
-                  uploadedFileId = uploadV2Result.file.file.id;
-                } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
-                  if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
-                    uploadedFileId = uploadV2Result.files[0].id;
-                  } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
-                    uploadedFileId = uploadV2Result.files[0].files[0].id;
-                  }
-                }
-              } catch (extractErr) {
-                console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
-              }
-
-              if (uploadedFileId) {
-                console.log('Image uploaded with uploadV2, file id:', uploadedFileId);
-              } else {
-                // If uploadV2 succeeded (no exception) but we couldn't extract an id, do not re-upload
-                // to avoid creating duplicate images. Log full response for debugging and provide a user-facing fallback.
-                console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
-                console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
-                try {
-                  await say(`I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`);
-                } catch (notifyErr) {
-                  console.warn('Failed to notify user about unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
-                }
-              }
-            } catch (uploadV2Error) {
-              console.error('Error with uploadV2 method:', uploadV2Error);
-              console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
-
-              // If uploadV2 fails, try the legacy method as a fallback
-              console.log('uploadV2 failed, trying legacy upload as fallback');
-              try {
-                const uploadResult = await app.client.files.upload({
-                  token: process.env.SLACK_BOT_TOKEN,
-                  channels: message.channel,
-                  file: imageBuffer,
-                  filename: 'dalle-image.png',
-                  title: prompt,
-                  initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-                });
-
-                console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
-              } catch (uploadError) {
-                console.error('Both upload methods failed:', uploadError);
-                await say(`I generated the image but had trouble uploading it: ${uploadV2Error && uploadV2Error.message ? uploadV2Error.message : uploadError.message}`);
-              }
-            }
-            
-            // Delete the "generating" message once complete
-            if (thinkingMsg && thinkingMsg.ts) {
-              try {
-                await app.client.chat.delete({
-                  token: process.env.SLACK_BOT_TOKEN,
-                  channel: message.channel,
-                  ts: thinkingMsg.ts
-                });
-              } catch (deleteError) {
-                console.log("Error deleting thinking message:", deleteError.message);
-              }
-            }
-          } catch (error) {
-            console.error("Error in image generation/upload:", error);
-            
-            // Delete the "generating" message
-            if (thinkingMsg && thinkingMsg.ts) {
-              try {
-                await app.client.chat.delete({
-                  token: process.env.SLACK_BOT_TOKEN,
-                  channel: message.channel,
-                  ts: thinkingMsg.ts
-                });
-              } catch (deleteError) {
-                console.log("Error deleting thinking message:", deleteError.message);
-              }
-            }
-            
-            // Send an error message
-            await say(`I apologize, but I encountered an error generating your image: ${error.message}`);
-          }
-        }, 100);
-      } catch (error) {
-        console.error("Error in initial direct mention image handling:", error);
-        await say(`I apologize, but I encountered an error: ${error.message}`);
-      }
-      return;
-    }
-
     // Fall back to ChatGPT if nothing above matches
     // Validate message text before proceeding
     if (!message.text || message.text.trim() === '') {
@@ -801,73 +565,44 @@ async function handleMessage(message, client = null, channel = null) {
       console.log("Message object:", JSON.stringify(message, null, 2));
       return; // Just silently ignore empty messages, don't respond
     }
-    
+
     // Check if the message appears to be a webhook event or another special message type
-    if (message.edited || message.thread_ts || message.parent_user_id || 
-        message.bot_profile || message.bot_id) {
+    if (message.edited || message.thread_ts || message.parent_user_id ||
+      message.bot_profile || message.bot_id) {
       console.log("Skipping special message in direct mention:", Object.keys(message));
       return;
     }
-    
+
     // Log the full message for debugging
     console.log("Processing direct mention:", JSON.stringify(message, null, 2));
-    
+
     // For better UX, let the user know we're processing their message
     let thinking = null;
     try {
-      thinking = await say({
-        text: "Thinking about your question...",
-        blocks: [
-          {
-            type: "context",
-            elements: [
-              {
-                type: "mrkdwn",
-                text: thinkingMessage
-              }
-            ]
-          }
-        ]
-      });
-      
+      thinking = await postThinking(say);
+
       // Get response from OpenAI
       const responseText = await handleMessage(message);
-      
+
       // Delete the thinking message
       if (thinking && thinking.ts) {
-        try {
-          await app.client.chat.delete({
-            channel: message.channel,
-            ts: thinking.ts
-          });
-        } catch (error) {
-          console.log("Error deleting thinking message:", error.message);
-        }
+        await clearThinking(message.channel, thinking.ts);
       }
-      
+
       // Send the actual response
       await say(responseText);
     } catch (error) {
       console.error("Error in direct mention processing:", error);
-      
+
       // Clean up thinking message if it exists
       if (thinking && thinking.ts) {
-        try {
-          await app.client.chat.delete({
-            channel: message.channel,
-            ts: thinking.ts
-          });
-        } catch (deleteError) {
-          console.log("Error deleting thinking message:", deleteError.message);
-        }
+        await clearThinking(message.channel, thinking.ts);
       }
-      
+
       // Send an error message to the user
       await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
     }
   });
-
-  // The /askgpt slash command has been removed. Use direct mentions or other slash commands (for example, /dalle for images).
 
   // Slash command to generate an image with DALL-E
   app.command('/dalle', async ({ command, ack, respond, client, context }) => {
@@ -875,13 +610,13 @@ async function handleMessage(message, client = null, channel = null) {
     console.log("Handler context:", JSON.stringify(context, null, 2));
     console.log("Command channel:", command.channel_id);
     console.log("Command user:", command.user_id);
-    
+
     try {
       // Acknowledge the command immediately - CRITICAL for Slack timeouts
       console.log("Acknowledging DALLE command...");
       await ack();
       console.log("DALLE command acknowledged successfully");
-      
+
       if (!command.text || command.text.trim() === '') {
         console.log("Empty prompt provided, sending error response");
         await respond({
@@ -890,10 +625,10 @@ async function handleMessage(message, client = null, channel = null) {
         });
         return;
       }
-      
+
       const prompt = command.text;
       console.log("Processing DALL-E image request:", prompt);
-      
+
       // Send an initial progress message
       await respond({
         text: `:art: Generating image for prompt: "${prompt}"...`,
@@ -924,7 +659,7 @@ async function handleMessage(message, client = null, channel = null) {
         ],
         response_type: 'ephemeral'
       });
-      
+
       // Start a new thread to handle the image generation and upload
       // This separates the command response from the heavy work
       setTimeout(async () => {
@@ -932,109 +667,109 @@ async function handleMessage(message, client = null, channel = null) {
           // Generate the image
           console.log("Calling OpenAI API for image generation");
           let imageBuffer = await generateImage(prompt);
-          
+
           if (!imageBuffer) {
             throw new Error("Failed to generate image buffer");
           }
-          
+
           // Post the image as a new message to the channel instead of using the response_url
           // This approach is more reliable for file uploads with slash commands
           console.log("Posting image to channel directly:", command.channel_id);
-          
+
+          try {
+            // Use the recommended uploadV2 method first
+            console.log('Attempting uploadV2 file upload to channel:', command.channel_id);
+            const uploadV2Result = await client.files.uploadV2({
+              token: process.env.SLACK_BOT_TOKEN,
+              channel_id: command.channel_id,
+              file: imageBuffer,
+              filename: 'dalle-image.png',
+              title: prompt,
+              initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+              alt_text: `DALL-E generated image for: ${prompt}`,
+            });
+
+            // Try to extract file id defensively from common shapes
+            let uploadedFileId = null;
             try {
-              // Use the recommended uploadV2 method first
-              console.log('Attempting uploadV2 file upload to channel:', command.channel_id);
-              const uploadV2Result = await client.files.uploadV2({
-                token: process.env.SLACK_BOT_TOKEN,
-                channel_id: command.channel_id,
-                file: imageBuffer,
-                filename: 'dalle-image.png',
-                title: prompt,
-                initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-                alt_text: `DALL-E generated image for: ${prompt}`,
-              });
-
-              // Try to extract file id defensively from common shapes
-              let uploadedFileId = null;
-              try {
-                if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
-                  uploadedFileId = uploadV2Result.file.id;
-                } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
-                  uploadedFileId = uploadV2Result.file.file.id;
-                } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
-                  if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
-                    uploadedFileId = uploadV2Result.files[0].id;
-                  } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
-                    uploadedFileId = uploadV2Result.files[0].files[0].id;
-                  }
-                }
-              } catch (extractErr) {
-                console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
-              }
-
-              if (uploadedFileId) {
-                console.log('V2 upload successful, file id:', uploadedFileId);
-              } else {
-                console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
-                console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
-                try {
-                  await respond({
-                    text: `I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`,
-                    response_type: 'ephemeral',
-                    replace_original: false
-                  });
-                } catch (notifyErr) {
-                  console.warn('Failed to send fallback response to user after unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
+              if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
+                uploadedFileId = uploadV2Result.file.id;
+              } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
+                uploadedFileId = uploadV2Result.file.file.id;
+              } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
+                if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
+                  uploadedFileId = uploadV2Result.files[0].id;
+                } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
+                  uploadedFileId = uploadV2Result.files[0].files[0].id;
                 }
               }
-            } catch (uploadV2Error) {
-              console.error('Error with uploadV2:', uploadV2Error);
-              console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+            } catch (extractErr) {
+              console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
+            }
 
+            if (uploadedFileId) {
+              console.log('V2 upload successful, file id:', uploadedFileId);
+            } else {
+              console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
+              console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
               try {
-                // Try the legacy upload method as fallback
-                console.log('Attempting legacy file upload to channel:', command.channel_id);
-                const uploadResult = await client.files.upload({
-                  token: process.env.SLACK_BOT_TOKEN,
-                  channels: command.channel_id,
-                  file: imageBuffer,
-                  filename: 'dalle-image.png',
-                  filetype: 'png',
-                  title: prompt,
-                  initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+                await respond({
+                  text: `I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`,
+                  response_type: 'ephemeral',
+                  replace_original: false
                 });
-
-                console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
-              } catch (uploadError) {
-                console.error('Both upload methods failed:', uploadError);
-                console.error('Full error details:', JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
-
-                // Final fallback: try posting a direct message
-                try {
-                  console.log('Attempting to post image using chat.postMessage');
-
-                  await client.chat.postMessage({
-                    token: process.env.SLACK_BOT_TOKEN,
-                    channel: command.channel_id,
-                    text: `Here's the DALL·E image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
-                  });
-
-                  console.log('Posted fallback message about the image');
-                } catch (msgError) {
-                  console.error('All posting methods failed:', msgError);
-
-                  // Let the user know the upload failed even though generation worked
-                  await respond({
-                    text: `:warning: Generated image for "${prompt}" but failed to upload it. Please check server logs for details.`,
-                    response_type: 'ephemeral',
-                    replace_original: false
-                  });
-                }
+              } catch (notifyErr) {
+                console.warn('Failed to send fallback response to user after unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
               }
             }
+          } catch (uploadV2Error) {
+            console.error('Error with uploadV2:', uploadV2Error);
+            console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+
+            try {
+              // Try the legacy upload method as fallback
+              console.log('Attempting legacy file upload to channel:', command.channel_id);
+              const uploadResult = await client.files.upload({
+                token: process.env.SLACK_BOT_TOKEN,
+                channels: command.channel_id,
+                file: imageBuffer,
+                filename: 'dalle-image.png',
+                filetype: 'png',
+                title: prompt,
+                initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+              });
+
+              console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
+            } catch (uploadError) {
+              console.error('Both upload methods failed:', uploadError);
+              console.error('Full error details:', JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
+
+              // Final fallback: try posting a direct message
+              try {
+                console.log('Attempting to post image using chat.postMessage');
+
+                await client.chat.postMessage({
+                  token: process.env.SLACK_BOT_TOKEN,
+                  channel: command.channel_id,
+                  text: `Here's the DALL·E image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
+                });
+
+                console.log('Posted fallback message about the image');
+              } catch (msgError) {
+                console.error('All posting methods failed:', msgError);
+
+                // Let the user know the upload failed even though generation worked
+                await respond({
+                  text: `:warning: Generated image for "${prompt}" but failed to upload it. Please check server logs for details.`,
+                  response_type: 'ephemeral',
+                  replace_original: false
+                });
+              }
+            }
+          }
         } catch (error) {
           console.error("Error in async image generation:", error);
-          
+
           // Notify the user about the failure
           await respond({
             text: `❌ Image generation failed: ${error.message}`,
@@ -1043,10 +778,10 @@ async function handleMessage(message, client = null, channel = null) {
           });
         }
       }, 100); // Short delay to ensure the acknowledgment completes first
-      
+
     } catch (error) {
       console.error("Error in initial /dalle command handling:", error);
-      
+
       // Only respond if we haven't acknowledged yet
       try {
         await respond({

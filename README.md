@@ -98,7 +98,7 @@ Direct mention example (in a channel or DM):
 Slash command example (image generation):
 
 ```text
-/dalle An image of Lt. Commander data and his cat
+/dalle An image of Lt. Commander Data and his cat
 ```
 
 ### 5. Deploy to production
