@@ -6,7 +6,17 @@
   "type": "module",
   "scripts": {
     "start": "node app.js",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint . --ext .js --max-warnings 0",
+    "lint:fix": "eslint . --ext .js --fix",
+    "format": "prettier --write ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/scarolan/data.git"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   },
   "license": "MIT",
   "dependencies": {
@@ -16,5 +26,11 @@
     "keyv": "^5.5.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.28.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.45.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-prettier": "^4.1.0",
+    "prettier": "^2.8.8"
   }
 }

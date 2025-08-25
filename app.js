@@ -22,8 +22,20 @@ const defaultPersonality = `You are a Soong type Android named ${process.env.SLA
 const personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
 
 // Get thinking message from environment variable or use default
-const defaultThinkingMessage = ":brain: _Accessing neural network pathways... Processing query..._";
+const defaultThinkingMessage = ':brain: _Accessing neural network pathways... Processing query..._';
 const thinkingMessage = process.env.THINKING_MESSAGE || defaultThinkingMessage;
+
+// Validate required environment variables early to fail fast
+function validateRequiredEnv() {
+  const required = ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_BOT_USER_NAME', 'OPENAI_API_KEY'];
+  const missing = required.filter((k) => !process.env[k]);
+  if (missing.length) {
+    console.error('Missing required environment variables:', missing.join(', '));
+    console.error('Please set them (see .env.example) and restart the process.');
+    process.exit(1);
+  }
+}
+validateRequiredEnv();
 
 // Import required libraries
 import pkg from '@slack/bolt';
@@ -45,6 +57,25 @@ const app = new App({
   //logLevel: LogLevel.DEBUG,
 });
 
+// Graceful shutdown handlers
+async function shutdown(signal) {
+  console.log(`Received ${signal}, stopping app...`);
+  try {
+    await app.stop();
+    console.log('App stopped.');
+  } catch (err) {
+    console.error('Error while stopping app:', err && err.message ? err.message : err);
+  }
+  process.exit(0);
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err && err.stack ? err.stack : err);
+  shutdown('uncaughtException');
+});
+
 // Create a redis namespace for the bot's memory
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
 
@@ -64,7 +95,9 @@ const store = new KeyvRedis(redisUrl, {
 });
 const messageStore = new Keyv({ store, namespace: 'chatgpt-slackbot' });
 
-console.log(`Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`);
+console.log(
+  `Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`
+);
 
 // Create a new instance of the ChatGPTAPI client
 const openai_api = new ChatGPTAPI({
@@ -72,13 +105,13 @@ const openai_api = new ChatGPTAPI({
   messageStore,
   systemMessage: personalityPrompt,
   completionParams: {
-    model: 'gpt-4o'
-  }
+    model: 'gpt-4o',
+  },
 });
 
 // OpenAI API client for generating images
 const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // Function to generate an image with DALL-E (model: gpt-image-1)
@@ -90,18 +123,18 @@ async function generateImage(prompt) {
       throw new Error('Empty prompt provided for image generation');
     }
 
-    console.log("Calling OpenAI API with parameters:", {
+    console.log('Calling OpenAI API with parameters:', {
       prompt: prompt,
       n: 1,
-      size: "1024x1024",
-      model: "gpt-image-1"
+      size: '1024x1024',
+      model: 'gpt-image-1',
     });
 
     const response = await openaiClient.images.generate({
       prompt,
       n: 1,
       size: '1024x1024',
-      model: 'gpt-image-1'
+      model: 'gpt-image-1',
     });
 
     if (!response || !response.data || !response.data[0] || !response.data[0].b64_json) {
@@ -116,7 +149,9 @@ async function generateImage(prompt) {
 
     // Warn if image size is large
     if (imageBuffer.length > 5 * 1024 * 1024) {
-      console.warn(`WARNING: Generated image is very large (${fileSizeKB}KB), may exceed Slack limits`);
+      console.warn(
+        `WARNING: Generated image is very large (${fileSizeKB}KB), may exceed Slack limits`
+      );
     }
 
     return imageBuffer;
@@ -126,7 +161,7 @@ async function generateImage(prompt) {
     if (error.response) {
       console.error('OpenAI API error details:', {
         status: error.response.status,
-        data: error.response.data
+        data: error.response.data,
       });
     }
     throw error;
@@ -138,19 +173,23 @@ const userParentMessageIds = new Map();
 
 // Function to handle messages and map them to their parent ids
 // This is how the bot is able to remember previous conversations
-async function handleMessage(message, client = null, channel = null) {
+async function handleMessage(message, _client = null, _channel = null) {
   let response;
   const userId = message.user;
 
   try {
     // Check if message.text is null or undefined
     if (!message.text) {
-      console.log("Received message with null or undefined text");
-      return "I apologize, but I cannot process an empty message. How may I assist you?";
+      console.log('Received message with null or undefined text');
+      return 'I apologize, but I cannot process an empty message. How may I assist you?';
     }
 
     // If the user asks about creating images, guide them to the /dalle command
-    if (message.text.match(/(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i)) {
+    if (
+      message.text.match(
+        /(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i
+      )
+    ) {
       return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
     }
 
@@ -170,15 +209,15 @@ async function handleMessage(message, client = null, channel = null) {
     //console.log(response.text);
     return response.text;
   } catch (error) {
-    console.error("Error in handleMessage:", error);
+    console.error('Error in handleMessage:', error);
 
     // Check if it's an OpenAI API error
-    if (error.statusCode === 400 && error.message.includes("content")) {
-      return "I apologize, but I encountered an issue processing your message. Could you please rephrase your request?";
+    if (error.statusCode === 400 && error.message.includes('content')) {
+      return 'I apologize, but I encountered an issue processing your message. Could you please rephrase your request?';
     }
 
     // Generic error message for other issues
-    return "I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.";
+    return 'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
   }
 }
 
@@ -190,18 +229,18 @@ async function postThinking(say, visibleText = thinkingMessage) {
       text: visibleText,
       blocks: [
         {
-          type: "context",
+          type: 'context',
           elements: [
             {
-              type: "mrkdwn",
-              text: thinkingMessage
-            }
-          ]
-        }
-      ]
+              type: 'mrkdwn',
+              text: thinkingMessage,
+            },
+          ],
+        },
+      ],
     });
   } catch (err) {
-    console.warn("Failed to post thinking message:", err && err.message ? err.message : err);
+    console.warn('Failed to post thinking message:', err && err.message ? err.message : err);
     return null;
   }
 }
@@ -212,13 +251,12 @@ async function clearThinking(channel, ts) {
   try {
     await app.client.chat.delete({ channel, ts });
   } catch (err) {
-    console.log("Error deleting thinking message:", err && err.message ? err.message : err);
+    console.log('Error deleting thinking message:', err && err.message ? err.message : err);
   }
 }
 
 // The functional code for your bot is below:
 (async () => {
-
   // Listens to all messages in channels the bot is a member of
   app.message(async ({ message, say, context }) => {
     ///////////////////////////////////////////////////////////////
@@ -230,14 +268,14 @@ async function clearThinking(channel, ts) {
 
     // Safeguard against undefined messages
     if (!message) {
-      console.log("Received undefined message");
+      console.log('Received undefined message');
       return;
     }
 
     // Skip if this is a direct mention, we'll handle those separately
     // to avoid duplicate responses
     if (context.botUserId && message.text && message.text.includes(`<@${context.botUserId}>`)) {
-      console.log("Skipping direct mention in general handler");
+      console.log('Skipping direct mention in general handler');
       return;
     }
 
@@ -249,18 +287,18 @@ async function clearThinking(channel, ts) {
 
     // Skip bot messages
     if (message.bot_id) {
-      console.log("Skipping message from a bot");
+      console.log('Skipping message from a bot');
       return;
     }
 
     // Log message for debugging
-    console.log("Processing message:", {
+    console.log('Processing message:', {
       channel_type: message.channel_type,
       has_text: !!message.text,
       text_length: message.text ? message.text.length : 0,
       has_blocks: !!message.blocks,
       has_attachments: !!message.attachments,
-      user: message.user
+      user: message.user,
     });
 
     // Responds any message containing 'i love you' with 'i know'
@@ -286,7 +324,22 @@ async function clearThinking(channel, ts) {
     // Danceparty response with a random mix of emoji
     if (message.text && message.text.match(/danceparty|dance party/i)) {
       // Both emoji and slack style :emoji: are supported
-      const emoji = ["💃", "🕺", "🎉", "🎊", "🎈", "🎶", "🎵", "🔊", "🕺💃", "🥳", "👯‍♀️", "👯‍♂️", "🪩", "🪅"];
+      const emoji = [
+        '💃',
+        '🕺',
+        '🎉',
+        '🎊',
+        '🎈',
+        '🎶',
+        '🎵',
+        '🔊',
+        '🕺💃',
+        '🥳',
+        '👯‍♀️',
+        '👯‍♂️',
+        '🪩',
+        '🪅',
+      ];
 
       // Select 10-12 random emoji from the array
       const numEmoji = Math.floor(Math.random() * 3) + 10;
@@ -297,7 +350,7 @@ async function clearThinking(channel, ts) {
       }
 
       // Join the selected emoji into a single string and send the message
-      const emojiString = selectedEmoji.join("");
+      const emojiString = selectedEmoji.join('');
       await say(emojiString);
       return;
     }
@@ -305,25 +358,25 @@ async function clearThinking(channel, ts) {
     // A button that opens a webpage
     if (message.text && message.text.match(/tiktok|tik tok/i)) {
       await say({
-        text: "Party mode activated! :female_singer:",
+        text: 'Party mode activated! :female_singer:',
         blocks: [
           {
-            type: "section",
+            type: 'section',
             text: {
-              type: "mrkdwn",
+              type: 'mrkdwn',
               text: "Grab my glasses, I'm out the door, I'm gonna hit the city! :sunglasses:",
             },
           },
           {
-            type: "actions",
+            type: 'actions',
             elements: [
               {
-                type: "button",
+                type: 'button',
                 text: {
-                  type: "plain_text",
-                  text: "DJ Blow My Speakers Up",
+                  type: 'plain_text',
+                  text: 'DJ Blow My Speakers Up',
                 },
-                url: "https://scarolan.github.io/rickroll/tiktok.html",
+                url: 'https://scarolan.github.io/rickroll/tiktok.html',
               },
             ],
           },
@@ -335,25 +388,25 @@ async function clearThinking(channel, ts) {
     // Another button that opens a webpage
     if (message.text && message.text.match(/rickroll|rick roll|never gonna give you up/i)) {
       await say({
-        text: "Rickroll activated!",
+        text: 'Rickroll activated!',
         blocks: [
           {
-            type: "section",
+            type: 'section',
             text: {
-              type: "mrkdwn",
+              type: 'mrkdwn',
               text: "We're no strangers to love...:man_dancing:",
             },
           },
           {
-            type: "actions",
+            type: 'actions',
             elements: [
               {
-                type: "button",
+                type: 'button',
                 text: {
-                  type: "plain_text",
-                  text: "Rickroll Me",
+                  type: 'plain_text',
+                  text: 'Rickroll Me',
                 },
-                url: "https://scarolan.github.io/rickroll/index.html",
+                url: 'https://scarolan.github.io/rickroll/index.html',
               },
             ],
           },
@@ -366,25 +419,25 @@ async function clearThinking(channel, ts) {
     if (message.channel_type === 'im') {
       // Validate message text before proceeding
       if (!message.text || message.text.trim() === '') {
-        console.log("Received empty message in DM");
-        console.log("Message object:", JSON.stringify(message, null, 2));
+        console.log('Received empty message in DM');
+        console.log('Message object:', JSON.stringify(message, null, 2));
         return; // Just silently ignore empty messages, don't respond
       }
 
       // Skip messages from bots
       if (message.bot_id) {
-        console.log("Skipping message from a bot in DM");
+        console.log('Skipping message from a bot in DM');
         return;
       }
 
       // Skip edited messages, thread replies, or messages that are clearly system events
       if (message.edited || message.subtype) {
-        console.log("Skipping edited or special message in DM");
+        console.log('Skipping edited or special message in DM');
         return;
       }
 
       // Log the full message for debugging
-      console.log("Processing DM message:", JSON.stringify(message, null, 2));
+      console.log('Processing DM message:', JSON.stringify(message, null, 2));
 
       // For better UX, let the user know we're processing their message
       let thinking = null;
@@ -402,7 +455,7 @@ async function clearThinking(channel, ts) {
         // Send the actual response
         await say(responseText);
       } catch (error) {
-        console.error("Error in DM message processing:", error);
+        console.error('Error in DM message processing:', error);
 
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
@@ -410,7 +463,9 @@ async function clearThinking(channel, ts) {
         }
 
         // Send an error message to the user
-        await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
+        await say(
+          'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.'
+        );
       }
     }
 
@@ -418,25 +473,25 @@ async function clearThinking(channel, ts) {
     if (message.channel_type === 'mpim') {
       // Ignore messages from bots
       if (message.bot_id) {
-        console.log("Ignoring message from a bot in MPIM");
+        console.log('Ignoring message from a bot in MPIM');
         return;
       }
 
       // Validate message text before proceeding
       if (!message.text || message.text.trim() === '') {
-        console.log("Received empty message in MPIM");
-        console.log("Message object:", JSON.stringify(message, null, 2));
+        console.log('Received empty message in MPIM');
+        console.log('Message object:', JSON.stringify(message, null, 2));
         return; // Just silently ignore empty messages, don't respond
       }
 
       // Skip edited messages or system messages
       if (message.edited || message.subtype) {
-        console.log("Skipping edited or special message in MPIM");
+        console.log('Skipping edited or special message in MPIM');
         return;
       }
 
       // Log the full message for debugging
-      console.log("Processing MPIM message:", JSON.stringify(message, null, 2));
+      console.log('Processing MPIM message:', JSON.stringify(message, null, 2));
 
       // For better UX, let the user know we're processing their message
       let thinking = null;
@@ -454,7 +509,7 @@ async function clearThinking(channel, ts) {
         // Send the actual response
         await say(responseText);
       } catch (error) {
-        console.error("Error in MPIM message processing:", error);
+        console.error('Error in MPIM message processing:', error);
 
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
@@ -462,11 +517,13 @@ async function clearThinking(channel, ts) {
         }
 
         // Send an error message to the user
-        await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
+        await say(
+          'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.'
+        );
       }
     }
   });
-  
+
   // Listens for @botname direct mentions
   app.message(directMention(), async ({ message, say }) => {
     ///////////////////////////////////////////////////////////////
@@ -477,7 +534,7 @@ async function clearThinking(channel, ts) {
 
     // Safeguard against undefined messages
     if (!message) {
-      console.log("Received undefined direct mention message");
+      console.log('Received undefined direct mention message');
       return;
     }
 
@@ -488,11 +545,11 @@ async function clearThinking(channel, ts) {
     }
 
     // Log direct mention for debugging
-    console.log("Processing direct mention:", {
+    console.log('Processing direct mention:', {
       channel_type: message.channel_type,
       has_text: !!message.text,
       text_length: message.text ? message.text.length : 0,
-      user: message.user
+      user: message.user,
     });
 
     // Show the help and usage instructions
@@ -518,7 +575,9 @@ async function clearThinking(channel, ts) {
         `@${process.env.SLACK_BOT_USER_NAME} write me a bash script to install nginx`,
       ].join('\n');
 
-      await say(`You can message me in the channel with @${process.env.SLACK_BOT_USER_NAME} or chat with me directly in a DM.\n\`\`\`${commandsList}\`\`\``);
+      await say(
+        `You can message me in the channel with @${process.env.SLACK_BOT_USER_NAME} or chat with me directly in a DM.\n\`\`\`${commandsList}\`\`\``
+      );
       return;
     }
 
@@ -537,17 +596,20 @@ async function clearThinking(channel, ts) {
 
     // Use an external API for your bot responses.
     // This one tells dad jokes and contains a randomly triggered zinger.
-    const djApi = "https://icanhazdadjoke.com/";
+    const djApi = 'https://icanhazdadjoke.com/';
     if (message.text && message.text.toLowerCase().includes('dad joke')) {
       try {
         const response = await fetch(djApi, {
-          headers: { Accept: "text/plain" },
+          headers: { Accept: 'text/plain' },
         });
         const joke = await response.text();
         // 1/20 chance to add this bit after the joke.
-        const zinger = Math.random() < 0.05 ? "\nThanks, I'll be here all week. Be sure and tip your waiter. :rolling_on_the_floor_laughing:" : "";
+        const zinger =
+          Math.random() < 0.05
+            ? "\nThanks, I'll be here all week. Be sure and tip your waiter. :rolling_on_the_floor_laughing:"
+            : '';
         await say(`${joke} :sheep::drum_with_drumsticks::snake:`);
-        await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+        await new Promise((resolve) => setTimeout(resolve, 10000)); // Wait 10 seconds
         if (zinger) {
           await say(`${zinger}`);
         }
@@ -556,25 +618,30 @@ async function clearThinking(channel, ts) {
         await say(`Encountered an error :( ${error}`);
       }
       return;
-    };
+    }
 
     // Fall back to ChatGPT if nothing above matches
     // Validate message text before proceeding
     if (!message.text || message.text.trim() === '') {
-      console.log("Received empty direct mention");
-      console.log("Message object:", JSON.stringify(message, null, 2));
+      console.log('Received empty direct mention');
+      console.log('Message object:', JSON.stringify(message, null, 2));
       return; // Just silently ignore empty messages, don't respond
     }
 
     // Check if the message appears to be a webhook event or another special message type
-    if (message.edited || message.thread_ts || message.parent_user_id ||
-      message.bot_profile || message.bot_id) {
-      console.log("Skipping special message in direct mention:", Object.keys(message));
+    if (
+      message.edited ||
+      message.thread_ts ||
+      message.parent_user_id ||
+      message.bot_profile ||
+      message.bot_id
+    ) {
+      console.log('Skipping special message in direct mention:', Object.keys(message));
       return;
     }
 
     // Log the full message for debugging
-    console.log("Processing direct mention:", JSON.stringify(message, null, 2));
+    console.log('Processing direct mention:', JSON.stringify(message, null, 2));
 
     // For better UX, let the user know we're processing their message
     let thinking = null;
@@ -592,7 +659,7 @@ async function clearThinking(channel, ts) {
       // Send the actual response
       await say(responseText);
     } catch (error) {
-      console.error("Error in direct mention processing:", error);
+      console.error('Error in direct mention processing:', error);
 
       // Clean up thinking message if it exists
       if (thinking && thinking.ts) {
@@ -600,64 +667,66 @@ async function clearThinking(channel, ts) {
       }
 
       // Send an error message to the user
-      await say("I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.");
+      await say(
+        'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.'
+      );
     }
   });
 
   // Slash command to generate an image with DALL-E
   app.command('/dalle', async ({ command, ack, respond, client, context }) => {
-    console.log("DALLE COMMAND RECEIVED:", JSON.stringify(command, null, 2));
-    console.log("Handler context:", JSON.stringify(context, null, 2));
-    console.log("Command channel:", command.channel_id);
-    console.log("Command user:", command.user_id);
+    console.log('DALLE COMMAND RECEIVED:', JSON.stringify(command, null, 2));
+    console.log('Handler context:', JSON.stringify(context, null, 2));
+    console.log('Command channel:', command.channel_id);
+    console.log('Command user:', command.user_id);
 
     try {
       // Acknowledge the command immediately - CRITICAL for Slack timeouts
-      console.log("Acknowledging DALLE command...");
+      console.log('Acknowledging DALLE command...');
       await ack();
-      console.log("DALLE command acknowledged successfully");
+      console.log('DALLE command acknowledged successfully');
 
       if (!command.text || command.text.trim() === '') {
-        console.log("Empty prompt provided, sending error response");
+        console.log('Empty prompt provided, sending error response');
         await respond({
-          text: "I need a description to generate an image. Please provide a prompt after the /dalle command.",
-          response_type: 'ephemeral'
+          text: 'I need a description to generate an image. Please provide a prompt after the /dalle command.',
+          response_type: 'ephemeral',
         });
         return;
       }
 
       const prompt = command.text;
-      console.log("Processing DALL-E image request:", prompt);
+      console.log('Processing DALL-E image request:', prompt);
 
       // Send an initial progress message
       await respond({
         text: `:art: Generating image for prompt: "${prompt}"...`,
         blocks: [
           {
-            type: "section",
+            type: 'section',
             text: {
-              type: "mrkdwn",
-              text: `:art: *Generating image with DALL·E*`
-            }
+              type: 'mrkdwn',
+              text: `:art: *Generating image with DALL·E*`,
+            },
           },
           {
-            type: "section",
+            type: 'section',
             text: {
-              type: "mrkdwn",
-              text: `> ${prompt}`
-            }
+              type: 'mrkdwn',
+              text: `> ${prompt}`,
+            },
           },
           {
-            type: "context",
+            type: 'context',
             elements: [
               {
-                type: "mrkdwn",
-                text: ":hourglass_flowing_sand: _This may take a few moments..._"
-              }
-            ]
-          }
+                type: 'mrkdwn',
+                text: ':hourglass_flowing_sand: _This may take a few moments..._',
+              },
+            ],
+          },
         ],
-        response_type: 'ephemeral'
+        response_type: 'ephemeral',
       });
 
       // Start a new thread to handle the image generation and upload
@@ -665,16 +734,16 @@ async function clearThinking(channel, ts) {
       setTimeout(async () => {
         try {
           // Generate the image
-          console.log("Calling OpenAI API for image generation");
+          console.log('Calling OpenAI API for image generation');
           let imageBuffer = await generateImage(prompt);
 
           if (!imageBuffer) {
-            throw new Error("Failed to generate image buffer");
+            throw new Error('Failed to generate image buffer');
           }
 
           // Post the image as a new message to the channel instead of using the response_url
           // This approach is more reliable for file uploads with slash commands
-          console.log("Posting image to channel directly:", command.channel_id);
+          console.log('Posting image to channel directly:', command.channel_id);
 
           try {
             // Use the recommended uploadV2 method first
@@ -694,37 +763,63 @@ async function clearThinking(channel, ts) {
             try {
               if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.id) {
                 uploadedFileId = uploadV2Result.file.id;
-              } else if (uploadV2Result && uploadV2Result.file && uploadV2Result.file.file && uploadV2Result.file.file.id) {
+              } else if (
+                uploadV2Result &&
+                uploadV2Result.file &&
+                uploadV2Result.file.file &&
+                uploadV2Result.file.file.id
+              ) {
                 uploadedFileId = uploadV2Result.file.file.id;
-              } else if (uploadV2Result && uploadV2Result.files && Array.isArray(uploadV2Result.files)) {
+              } else if (
+                uploadV2Result &&
+                uploadV2Result.files &&
+                Array.isArray(uploadV2Result.files)
+              ) {
                 if (uploadV2Result.files[0] && uploadV2Result.files[0].id) {
                   uploadedFileId = uploadV2Result.files[0].id;
-                } else if (uploadV2Result.files[0] && uploadV2Result.files[0].files && Array.isArray(uploadV2Result.files[0].files) && uploadV2Result.files[0].files[0] && uploadV2Result.files[0].files[0].id) {
+                } else if (
+                  uploadV2Result.files[0] &&
+                  uploadV2Result.files[0].files &&
+                  Array.isArray(uploadV2Result.files[0].files) &&
+                  uploadV2Result.files[0].files[0] &&
+                  uploadV2Result.files[0].files[0].id
+                ) {
                   uploadedFileId = uploadV2Result.files[0].files[0].id;
                 }
               }
             } catch (extractErr) {
-              console.warn('Error extracting file id from uploadV2 response:', extractErr && extractErr.message ? extractErr.message : extractErr);
+              console.warn(
+                'Error extracting file id from uploadV2 response:',
+                extractErr && extractErr.message ? extractErr.message : extractErr
+              );
             }
 
             if (uploadedFileId) {
               console.log('V2 upload successful, file id:', uploadedFileId);
             } else {
-              console.warn('uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.');
+              console.warn(
+                'uploadV2 returned an unexpected shape but did not throw. NOT re-uploading to avoid duplicates. Full result logged.'
+              );
               console.log('Full uploadV2 result:', JSON.stringify(uploadV2Result, null, 2));
               try {
                 await respond({
                   text: `I generated the image for: "${prompt}", but Slack returned an unexpected upload response. The image may already be available in the channel or server logs. If you don't see it, please try the command again.`,
                   response_type: 'ephemeral',
-                  replace_original: false
+                  replace_original: false,
                 });
               } catch (notifyErr) {
-                console.warn('Failed to send fallback response to user after unexpected uploadV2 shape:', notifyErr && notifyErr.message ? notifyErr.message : notifyErr);
+                console.warn(
+                  'Failed to send fallback response to user after unexpected uploadV2 shape:',
+                  notifyErr && notifyErr.message ? notifyErr.message : notifyErr
+                );
               }
             }
           } catch (uploadV2Error) {
             console.error('Error with uploadV2:', uploadV2Error);
-            console.error('V2 error details:', JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2));
+            console.error(
+              'V2 error details:',
+              JSON.stringify(uploadV2Error, Object.getOwnPropertyNames(uploadV2Error), 2)
+            );
 
             try {
               // Try the legacy upload method as fallback
@@ -739,10 +834,18 @@ async function clearThinking(channel, ts) {
                 initial_comment: `Here's the DALL·E image for: "${prompt}"`,
               });
 
-              console.log('Legacy image upload successful:', uploadResult && uploadResult.file && uploadResult.file.id ? uploadResult.file.id : JSON.stringify(uploadResult));
+              console.log(
+                'Legacy image upload successful:',
+                uploadResult && uploadResult.file && uploadResult.file.id
+                  ? uploadResult.file.id
+                  : JSON.stringify(uploadResult)
+              );
             } catch (uploadError) {
               console.error('Both upload methods failed:', uploadError);
-              console.error('Full error details:', JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2));
+              console.error(
+                'Full error details:',
+                JSON.stringify(uploadError, Object.getOwnPropertyNames(uploadError), 2)
+              );
 
               // Final fallback: try posting a direct message
               try {
@@ -762,34 +865,33 @@ async function clearThinking(channel, ts) {
                 await respond({
                   text: `:warning: Generated image for "${prompt}" but failed to upload it. Please check server logs for details.`,
                   response_type: 'ephemeral',
-                  replace_original: false
+                  replace_original: false,
                 });
               }
             }
           }
         } catch (error) {
-          console.error("Error in async image generation:", error);
+          console.error('Error in async image generation:', error);
 
           // Notify the user about the failure
           await respond({
             text: `❌ Image generation failed: ${error.message}`,
             response_type: 'ephemeral',
-            replace_original: false
+            replace_original: false,
           });
         }
       }, 100); // Short delay to ensure the acknowledgment completes first
-
     } catch (error) {
-      console.error("Error in initial /dalle command handling:", error);
+      console.error('Error in initial /dalle command handling:', error);
 
       // Only respond if we haven't acknowledged yet
       try {
         await respond({
           text: `❌ Error processing command: ${error.message}`,
-          response_type: 'ephemeral'
+          response_type: 'ephemeral',
         });
       } catch (respondError) {
-        console.error("Failed to send error response:", respondError);
+        console.error('Failed to send error response:', respondError);
       }
     }
   });

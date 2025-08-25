@@ -11,7 +11,7 @@ features:
   slash_commands:
     - command: /dalle
       description: Generate an image with DALL-E
-      usage_hint: "<prompt>"
+      usage_hint: '<prompt>'
       should_escape: false
 oauth_config:
   scopes:
