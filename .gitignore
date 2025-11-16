@@ -5,3 +5,4 @@ package-lock.json
 # Local environment and credentials
 run_bot.ps1
 *.env
+start-with-tracing.sh

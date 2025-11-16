@@ -34,6 +34,17 @@ function validateRequiredEnv() {
     console.error('Please set them (see .env.example) and restart the process.');
     process.exit(1);
   }
+  
+  // Set LangSmith tracing defaults if not already set
+  if (!process.env.LANGCHAIN_CALLBACKS_BACKGROUND) {
+    process.env.LANGCHAIN_CALLBACKS_BACKGROUND = 'true';
+  }
+  
+  // Log LangSmith configuration
+  if (process.env.LANGSMITH_TRACING === 'true') {
+    console.log('LangSmith tracing enabled');
+    console.log(`LangSmith Project: ${process.env.LANGSMITH_PROJECT || 'default'}`);
+  }
 }
 validateRequiredEnv();
 
@@ -41,8 +52,15 @@ validateRequiredEnv();
 import pkg from '@slack/bolt';
 const { App } = pkg;
 import { directMention } from '@slack/bolt';
-import { ChatGPTAPI } from 'chatgpt';
+import { ChatOpenAI } from '@langchain/openai';
+import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
+import { StringOutputParser } from '@langchain/core/output_parsers';
+import { RunnableSequence } from '@langchain/core/runnables';
+import { ConversationSummaryBufferMemory } from '@langchain/classic/memory';
+import { RedisChatMessageHistory } from '@langchain/community/stores/message/ioredis';
+import { traceable } from 'langsmith/traceable';
 import OpenAI from 'openai';
+import Redis from 'ioredis';
 import Keyv from 'keyv';
 import KeyvRedis from '@keyv/redis';
 import fetch from 'node-fetch';
@@ -99,15 +117,58 @@ console.log(
   `Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`
 );
 
-// Create a new instance of the ChatGPTAPI client
-const openai_api = new ChatGPTAPI({
-  apiKey: process.env.OPENAI_API_KEY,
-  messageStore,
-  systemMessage: personalityPrompt,
-  completionParams: {
-    model: 'gpt-4o',
-  },
+// Create Redis client for LangChain memory
+const redisClient = new Redis(redisUrl);
+
+// Create LangChain ChatOpenAI instance
+const chatModel = new ChatOpenAI({
+  modelName: 'gpt-4o',
+  openAIApiKey: process.env.OPENAI_API_KEY,
+  temperature: 0.7,
 });
+
+// Function to get or create conversation chain with memory for each user
+// Uses ConversationSummaryBufferMemory to automatically summarize old messages
+// when conversation gets long, preventing token limit issues
+function getConversationChain(userId) {
+  const chatHistory = new RedisChatMessageHistory({
+    sessionId: `chat:${userId}`,
+    client: redisClient,
+  });
+
+  const memory = new ConversationSummaryBufferMemory({
+    llm: chatModel, // Use same model for summarization
+    maxTokenLimit: 2000, // Summarize when context exceeds this
+    chatHistory,
+    returnMessages: true,
+    memoryKey: 'history',
+  });
+
+  const promptTemplate = ChatPromptTemplate.fromMessages([
+    ['system', personalityPrompt],
+    ['placeholder', '{history}'],
+    ['human', '{input}'],
+  ]);
+
+  const outputParser = new StringOutputParser();
+  
+  return {
+    chain: RunnableSequence.from([
+      {
+        input: (input) => input.input,
+        history: async () => {
+          const messages = await memory.loadMemoryVariables({});
+          return messages.history || [];
+        },
+      },
+      promptTemplate,
+      chatModel,
+      outputParser,
+    ]),
+    chatHistory,
+    memory, // Return memory instance for saving context
+  };
+}
 
 // OpenAI API client for generating images
 const openaiClient = new OpenAI({
@@ -115,7 +176,7 @@ const openaiClient = new OpenAI({
 });
 
 // Function to generate an image with DALL-E (model: gpt-image-1)
-async function generateImage(prompt) {
+const generateImage = traceable(async function generateImage(prompt) {
   try {
     console.log(`Generating DALL-E image with prompt: "${prompt}"`);
 
@@ -166,48 +227,65 @@ async function generateImage(prompt) {
     }
     throw error;
   }
-}
+}, { 
+  name: 'generateImage', 
+  tags: ['dalle', 'image-generation'],
+  metadata: { model: 'gpt-image-1', size: '1024x1024' }
+});
 
-// Use this map to track the parent message ids for each user
-const userParentMessageIds = new Map();
-
-// Function to handle messages and map them to their parent ids
-// This is how the bot is able to remember previous conversations
-async function handleMessage(message, _client = null, _channel = null) {
-  let response;
-  const userId = message.user;
-
+// Function to handle messages with LangChain tracing
+// This maintains conversation context using LangChain's ConversationSummaryBufferMemory + RedisChatMessageHistory
+// Automatically summarizes old messages when conversations get long to prevent token limits
+const handleMessage = traceable(async function handleMessage(userInput, userId, channelType = 'unknown') {
   try {
-    // Check if message.text is null or undefined
-    if (!message.text) {
-      console.log('Received message with null or undefined text');
+    // Check if input is null or undefined
+    if (!userInput) {
+      console.log('Received null or undefined input');
       return 'I apologize, but I cannot process an empty message. How may I assist you?';
     }
 
     // If the user asks about creating images, guide them to the /dalle command
     if (
-      message.text.match(
+      userInput.match(
         /(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i
       )
     ) {
       return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
     }
 
-    // Process the message with OpenAI
-    if (!userParentMessageIds.has(userId)) {
-      // send the first message without a parentMessageId
-      response = await openai_api.sendMessage(message.text);
-    } else {
-      // send a follow-up message with the stored parentMessageId
-      const parentId = userParentMessageIds.get(userId);
-      response = await openai_api.sendMessage(message.text, { parentMessageId: parentId });
-    }
+    // Get conversation chain with memory for this user
+    const { chain, chatHistory, memory } = getConversationChain(userId);
+    
+    // Get current conversation length for metadata
+    const messages = await chatHistory.getMessages();
+    const conversationLength = messages.length;
 
-    // store the parent message id for this user
-    userParentMessageIds.set(userId, response.id);
+    // Log for debugging
+    console.log('Invoking chain with input:', userInput);
+    console.log('Current conversation length:', conversationLength);
+    
+    // Invoke the LangChain conversation chain
+    const response = await chain.invoke(
+      { input: userInput },
+      {
+        tags: ['slack-chat', channelType],
+        metadata: {
+          userId: userId,
+          channelType: channelType,
+          conversationLength: conversationLength,
+        },
+        runName: `Chat: ${userInput.substring(0, 50)}${userInput.length > 50 ? '...' : ''}`,
+      }
+    );
 
-    //console.log(response.text);
-    return response.text;
+    // Save the conversation to memory using ConversationSummaryBufferMemory's saveContext
+    // This will automatically summarize if needed
+    await memory.saveContext(
+      { input: userInput },
+      { output: response }
+    );
+
+    return response;
   } catch (error) {
     console.error('Error in handleMessage:', error);
 
@@ -219,7 +297,19 @@ async function handleMessage(message, _client = null, _channel = null) {
     // Generic error message for other issues
     return 'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
   }
-}
+}, { 
+  name: 'handleMessage', 
+  tags: ['slack-chat', 'conversation'],
+  // processInputs transforms the logged inputs for LangSmith display
+  // With 3 parameters, default format is { args: [param1, param2, param3] }
+  // We extract just the user's message text for clean display
+  processInputs: (inputs) => ({ input: inputs.args[0] }),
+  // Store userId and channelType in metadata instead
+  metadata: (userInput, userId, channelType) => ({
+    userId,
+    channelType
+  })
+});
 
 // Helper: post a consistent "thinking" message with the configured context text
 // Defaults the visible text to the environment-configurable `THINKING_MESSAGE`
@@ -445,7 +535,7 @@ async function clearThinking(channel, ts) {
         thinking = await postThinking(say);
 
         // Get response from OpenAI
-        const responseText = await handleMessage(message);
+        const responseText = await handleMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
@@ -499,7 +589,7 @@ async function clearThinking(channel, ts) {
         thinking = await postThinking(say);
 
         // Get response from OpenAI
-        const responseText = await handleMessage(message);
+        const responseText = await handleMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
@@ -649,7 +739,7 @@ async function clearThinking(channel, ts) {
       thinking = await postThinking(say);
 
       // Get response from OpenAI
-      const responseText = await handleMessage(message);
+      const responseText = await handleMessage(message.text, message.user, message.channel_type);
 
       // Delete the thinking message
       if (thinking && thinking.ts) {

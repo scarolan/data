@@ -21,9 +21,17 @@
   "license": "MIT",
   "dependencies": {
     "@keyv/redis": "^5.1.1",
+    "@langchain/classic": "^1.0.3",
+    "@langchain/community": "^1.0.3",
+    "@langchain/core": "^1.0.5",
+    "@langchain/openai": "^1.1.1",
+    "@langchain/redis": "^1.0.0",
     "@slack/bolt": "^3.17.1",
     "chatgpt": "^5.2.5",
+    "ioredis": "^5.8.2",
     "keyv": "^5.5.0",
+    "langchain": "^1.0.4",
+    "langsmith": "^0.3.79",
     "node-fetch": "^3.3.2",
     "openai": "^4.28.0"
   },
