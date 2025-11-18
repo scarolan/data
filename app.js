@@ -56,9 +56,10 @@ import { ChatOpenAI } from '@langchain/openai';
 import { ChatPromptTemplate, MessagesPlaceholder } from '@langchain/core/prompts';
 import { StringOutputParser } from '@langchain/core/output_parsers';
 import { RunnableSequence } from '@langchain/core/runnables';
-import { ConversationSummaryBufferMemory } from '@langchain/classic/memory';
+import { BufferWindowMemory } from '@langchain/classic/memory';
 import { RedisChatMessageHistory } from '@langchain/community/stores/message/ioredis';
 import { traceable } from 'langsmith/traceable';
+import { Client } from 'langsmith';
 import OpenAI from 'openai';
 import Redis from 'ioredis';
 import Keyv from 'keyv';
@@ -92,6 +93,11 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('uncaughtException', (err) => {
   console.error('Uncaught exception:', err && err.stack ? err.stack : err);
   shutdown('uncaughtException');
+});
+
+// Initialize LangSmith client for feedback
+const langsmithClient = new Client({
+  apiKey: process.env.LANGCHAIN_API_KEY,
 });
 
 // Create a redis namespace for the bot's memory
@@ -128,17 +134,16 @@ const chatModel = new ChatOpenAI({
 });
 
 // Function to get or create conversation chain with memory for each user
-// Uses ConversationSummaryBufferMemory to automatically summarize old messages
-// when conversation gets long, preventing token limit issues
+// Uses BufferWindowMemory to keep last K messages in conversation history
+// Simple, predictable token usage that stabilizes around 5k tokens
 function getConversationChain(userId) {
   const chatHistory = new RedisChatMessageHistory({
     sessionId: `chat:${userId}`,
     client: redisClient,
   });
 
-  const memory = new ConversationSummaryBufferMemory({
-    llm: chatModel, // Use same model for summarization
-    maxTokenLimit: 2000, // Summarize when context exceeds this
+  const memory = new BufferWindowMemory({
+    k: 20, // Keep last 20 messages (10 exchanges)
     chatHistory,
     returnMessages: true,
     memoryKey: 'history',
@@ -168,6 +173,44 @@ function getConversationChain(userId) {
     chatHistory,
     memory, // Return memory instance for saving context
   };
+}
+
+// Helper function to create Slack blocks with feedback buttons
+function createFeedbackBlocks(messageText, runId) {
+  return [
+    {
+      type: 'section',
+      text: {
+        type: 'mrkdwn',
+        text: messageText,
+      },
+    },
+    {
+      type: 'actions',
+      block_id: 'feedback_actions',
+      elements: [
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '👍 Helpful',
+          },
+          action_id: 'feedback_positive',
+          value: runId,
+          style: 'primary',
+        },
+        {
+          type: 'button',
+          text: {
+            type: 'plain_text',
+            text: '👎 Not Helpful',
+          },
+          action_id: 'feedback_negative',
+          value: runId,
+        },
+      ],
+    },
+  ];
 }
 
 // OpenAI API client for generating images
@@ -234,14 +277,14 @@ const generateImage = traceable(async function generateImage(prompt) {
 });
 
 // Function to handle messages with LangChain tracing
-// This maintains conversation context using LangChain's ConversationSummaryBufferMemory + RedisChatMessageHistory
-// Automatically summarizes old messages when conversations get long to prevent token limits
+// This maintains conversation context using LangChain's BufferWindowMemory + RedisChatMessageHistory
+// Returns both the response text and the LangSmith run ID for feedback tracking
 const handleMessage = traceable(async function handleMessage(userInput, userId, channelType = 'unknown') {
   try {
     // Check if input is null or undefined
     if (!userInput) {
       console.log('Received null or undefined input');
-      return 'I apologize, but I cannot process an empty message. How may I assist you?';
+      return { response: 'I apologize, but I cannot process an empty message. How may I assist you?', runId: null };
     }
 
     // If the user asks about creating images, guide them to the /dalle command
@@ -250,7 +293,7 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
         /(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i
       )
     ) {
-      return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
+      return { response: `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``, runId: null };
     }
 
     // Get conversation chain with memory for this user
@@ -278,23 +321,29 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
       }
     );
 
-    // Save the conversation to memory using ConversationSummaryBufferMemory's saveContext
-    // This will automatically summarize if needed
+    // Save the conversation to memory
     await memory.saveContext(
       { input: userInput },
       { output: response }
     );
 
-    return response;
+    // Set TTL on Redis keys to expire after configured hours (default 24)
+    // Ensures Data's memory wipes after the configured period
+    const chatHistoryKey = `chat:${userId}`;
+    await redisClient.expire(chatHistoryKey, memoryTtlSeconds);
+
+    // Return both response and a placeholder runId (we'll capture real ID later)
+    return { response, runId: null };
   } catch (error) {
     console.error('Error in handleMessage:', error);
 
     // Check if it's an OpenAI API error
     if (error.statusCode === 400 && error.message.includes('content')) {
-      return 'I apologize, but I encountered an issue processing your message. Could you please rephrase your request?';
+      return { response: 'I apologize, but I encountered an issue processing your message. Could you please rephrase your request?', runId: null };
     }
 
     // Generic error message for other issues
+    return { response: 'My neural pathways are experiencing a malfunction. Please try again.', runId: null };
     return 'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
   }
 }, { 
@@ -355,6 +404,15 @@ async function clearThinking(channel, ts) {
     // These phrases do not require an @botname to be triggered.
     // Use these sparingly and be sure your match is not too broad.
     ///////////////////////////////////////////////////////////////
+
+    console.log('[GENERAL] Received message:', {
+      channel_type: message?.channel_type,
+      has_text: !!message?.text,
+      text_preview: message?.text?.substring(0, 50),
+      has_subtype: !!message?.subtype,
+      subtype: message?.subtype,
+      bot_id: message?.bot_id,
+    });
 
     // Safeguard against undefined messages
     if (!message) {
@@ -534,18 +592,34 @@ async function clearThinking(channel, ts) {
       try {
         thinking = await postThinking(say);
 
-        // Get response from OpenAI
-        const responseText = await handleMessage(message.text, message.user, message.channel_type);
+        // Get response from OpenAI (now returns { response, runId })
+        const handlerResult = await handleMessage(message.text, message.user, message.channel_type);
+        
+        console.log('[DM] handleMessage result type:', typeof handlerResult);
+        
+        // Extract response and runId from result
+        const responseText = typeof handlerResult === 'string' ? handlerResult : (handlerResult?.response || handlerResult);
+        const runId = typeof handlerResult === 'object' ? handlerResult?.runId : null;
+        
+        console.log('[DM] Extracted responseText length:', responseText ? responseText.length : 'undefined');
+        console.log('[DM] Extracted runId:', runId);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
           await clearThinking(message.channel, thinking.ts);
         }
 
-        // Send the actual response
-        await say(responseText);
+        // ALWAYS show buttons (we'll fix runId capture later)
+        console.log('[DM] Sending response with feedback buttons');
+        const truncatedText = responseText.length > 2900 ? responseText.substring(0, 2900) + '...' : responseText;
+        
+        await say({
+          text: truncatedText,
+          blocks: createFeedbackBlocks(truncatedText, runId || 'pending'),
+        });
       } catch (error) {
-        console.error('Error in DM message processing:', error);
+        console.error('[DM] ERROR:', error);
+        console.error('[DM] ERROR stack:', error.stack);
 
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
@@ -588,16 +662,24 @@ async function clearThinking(channel, ts) {
       try {
         thinking = await postThinking(say);
 
-        // Get response from OpenAI
-        const responseText = await handleMessage(message.text, message.user, message.channel_type);
+        // Get response from OpenAI (now returns { response, runId })
+        const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
           await clearThinking(message.channel, thinking.ts);
         }
 
-        // Send the actual response
-        await say(responseText);
+        // Send the actual response with feedback buttons if we have a run ID
+        if (runId) {
+          await say({
+            text: responseText,
+            blocks: createFeedbackBlocks(responseText, runId),
+          });
+        } else {
+          // Fallback to plain text if no run ID
+          await say(responseText);
+        }
       } catch (error) {
         console.error('Error in MPIM message processing:', error);
 
@@ -738,16 +820,24 @@ async function clearThinking(channel, ts) {
     try {
       thinking = await postThinking(say);
 
-      // Get response from OpenAI
-      const responseText = await handleMessage(message.text, message.user, message.channel_type);
+      // Get response from OpenAI (now returns { response, runId })
+      const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
 
       // Delete the thinking message
       if (thinking && thinking.ts) {
         await clearThinking(message.channel, thinking.ts);
       }
 
-      // Send the actual response
-      await say(responseText);
+      // Send the actual response with feedback buttons if we have a run ID
+      if (runId) {
+        await say({
+          text: responseText,
+          blocks: createFeedbackBlocks(responseText, runId),
+        });
+      } else {
+        // Fallback to plain text if no run ID
+        await say(responseText);
+      }
     } catch (error) {
       console.error('Error in direct mention processing:', error);
 
@@ -760,6 +850,108 @@ async function clearThinking(channel, ts) {
       await say(
         'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.'
       );
+    }
+  });
+
+  // Handle feedback button clicks - Positive feedback
+  app.action('feedback_positive', async ({ ack, body, client }) => {
+    await ack();
+    
+    try {
+      const runId = body.actions[0].value;
+      const userId = body.user.id;
+      
+      console.log(`Positive feedback received for run ${runId} from user ${userId}`);
+      
+      // Only submit to LangSmith if we have a valid UUID
+      if (runId && runId !== 'pending' && runId !== 'test-run-123' && runId.length > 20) {
+        try {
+          await langsmithClient.createFeedback(runId, runId, {
+            key: 'user-feedback',
+            score: 1,
+            value: 'positive',
+            comment: 'User found response helpful',
+          });
+          console.log('[Feedback] Successfully submitted to LangSmith');
+        } catch (error) {
+          console.error('[Feedback] Failed to submit to LangSmith:', error.message);
+        }
+      } else {
+        console.log('[Feedback] Skipping LangSmith submission (no valid runId)');
+      }
+      
+      // Update the message to show feedback was recorded
+      const originalBlocks = body.message.blocks.slice(0, -1); // Remove button block
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: body.message.text,
+        blocks: [
+          ...originalBlocks,
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '✅ Thanks for your feedback!',
+              },
+            ],
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Error handling positive feedback:', error);
+    }
+  });
+
+  // Handle feedback button clicks - Negative feedback
+  app.action('feedback_negative', async ({ ack, body, client }) => {
+    await ack();
+    
+    try {
+      const runId = body.actions[0].value;
+      const userId = body.user.id;
+      
+      console.log(`Negative feedback received for run ${runId} from user ${userId}`);
+      
+      // Only submit to LangSmith if we have a valid UUID
+      if (runId && runId !== 'pending' && runId !== 'test-run-123' && runId.length > 20) {
+        try {
+          await langsmithClient.createFeedback(runId, runId, {
+            key: 'user-feedback',
+            score: 0,
+            value: 'negative',
+            comment: 'User found response not helpful',
+          });
+          console.log('[Feedback] Successfully submitted to LangSmith');
+        } catch (error) {
+          console.error('[Feedback] Failed to submit to LangSmith:', error.message);
+        }
+      } else {
+        console.log('[Feedback] Skipping LangSmith submission (no valid runId)');
+      }
+      
+      // Update the message to show feedback was recorded
+      const originalBlocks = body.message.blocks.slice(0, -1); // Remove button block
+      await client.chat.update({
+        channel: body.channel.id,
+        ts: body.message.ts,
+        text: body.message.text,
+        blocks: [
+          ...originalBlocks,
+          {
+            type: 'context',
+            elements: [
+              {
+                type: 'mrkdwn',
+                text: '📝 Thanks for your feedback! We\'ll use this to improve.',
+              },
+            ],
+          },
+        ],
+      });
+    } catch (error) {
+      console.error('Error handling negative feedback:', error);
     }
   });
 
