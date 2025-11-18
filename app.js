@@ -314,6 +314,7 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
           userId: userId,
           channelType: channelType,
           conversationLength: conversationLength,
+          session_id: userId, // Thread/session ID for LangSmith threads view
         },
         runName: `Chat: ${userInput.substring(0, 50)}${userInput.length > 50 ? '...' : ''}`,
       }
