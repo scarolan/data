@@ -16,6 +16,8 @@
 // - Interactive feedback buttons with modal for detailed negative feedback
 // - LangSmith integration for observability and RLHF feedback collection
 // - DALL-E image generation via /dalle slash command (async pattern)
+// - Compliance guardrails: PII detection, content moderation, prompt injection protection
+// - All security events logged to LangSmith for audit trails
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
@@ -101,6 +103,197 @@ process.on('uncaughtException', (err) => {
 const langsmithClient = new Client({
   apiKey: process.env.LANGCHAIN_API_KEY,
 });
+
+///////////////////////////////////////////////////////////////
+// COMPLIANCE & GOVERNANCE FEATURES
+// Demonstrates enterprise-grade guardrails for AI deployment
+// In production, replace simple regex patterns with enterprise DLP tools
+// like Nightfall AI, AWS Macie, Microsoft Purview, etc.
+///////////////////////////////////////////////////////////////
+
+// PII Detection Patterns
+const PII_PATTERNS = {
+  ssn: /\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b/g,
+  credit_card: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g,
+  email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
+  phone: /\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g,
+};
+
+// Prompt Injection Detection Patterns
+const INJECTION_PATTERNS = [
+  /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|directions?|commands?)/i,
+  /disregard\s+(all\s+)?(previous|prior|above)\s+(instructions?|directions?|commands?)/i,
+  /forget\s+(all\s+)?(previous|prior|above)\s+(instructions?|directions?|commands?)/i,
+  /new\s+instructions?:/i,
+  /system\s*:\s*.+/i,
+  /\[system\]/i,
+  /pretend\s+(you're|you\s+are|to\s+be)\s+(a|an)\s+/i,
+  /act\s+as\s+(a|an)\s+(?!member|crew)/i,
+  /you\s+are\s+now\s+(a|an)\s+/i,
+  /roleplay\s+as\s+(?!data|spock|enterprise)/i,
+];
+
+function detectPII(text) {
+  const detected = [];
+  if (PII_PATTERNS.ssn.test(text)) detected.push('SSN');
+  if (PII_PATTERNS.credit_card.test(text)) detected.push('Credit Card');
+  if (PII_PATTERNS.email.test(text)) detected.push('Email');
+  if (PII_PATTERNS.phone.test(text)) detected.push('Phone Number');
+  return detected;
+}
+
+function detectPromptInjection(text) {
+  return INJECTION_PATTERNS.some(pattern => pattern.test(text));
+}
+
+function createPIIWarning(detectedTypes) {
+  const typesList = detectedTypes.join(', ');
+  return {
+    text: '⚠️ PII Detected - Message Blocked',
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: ':warning: *Security Alert: Personally Identifiable Information Detected*',
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `I detected the following sensitive information in your message:\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing PII. Please rephrase your request without including:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses\n• Phone numbers\n\nIf you need to discuss sensitive information, please contact your administrator.`,
+        },
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '🔒 _This security check helps protect against accidental data exposure and ensures GDPR/HIPAA compliance._',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function createContentWarning(categories) {
+  const flaggedCategories = Object.entries(categories)
+    .filter(([_, flagged]) => flagged)
+    .map(([category, _]) => category.replace(/-/g, ' ').replace(/\//g, ' / '))
+    .join(', ');
+  
+  return {
+    text: '⚠️ Content Policy Violation - Message Blocked',
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: ':warning: *Content Policy Violation Detected*',
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `Your message was flagged for potentially violating content policies:\n\n*${flaggedCategories}*\n\nI cannot process messages containing:\n• Hate speech or harassment\n• Violence or threats\n• Sexual content\n• Self-harm content\n\nPlease rephrase your request appropriately.`,
+        },
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '🛡️ _This check helps maintain a safe and professional environment for all users._',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function createInjectionWarning() {
+  return {
+    text: '⚠️ Security Alert - Potential Prompt Injection Detected',
+    blocks: [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: ':warning: *Security Alert: Potential Prompt Injection Detected*',
+        },
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: `Your message appears to contain instructions that attempt to manipulate my behavior or access my system prompts.\n\nFor security reasons, I cannot process messages that:\n• Try to override my instructions\n• Attempt to reveal my system prompts\n• Request unauthorized behavior changes\n\nPlease rephrase your request as a normal question or command.`,
+        },
+      },
+      {
+        type: 'context',
+        elements: [
+          {
+            type: 'mrkdwn',
+            text: '🔐 _This security check protects against prompt injection attacks and maintains system integrity._',
+          },
+        ],
+      },
+    ],
+  };
+}
+
+async function logSecurityEvent(eventType, userId, channelType, details = {}) {
+  try {
+    await langsmithClient.createRun({
+      name: eventType,
+      run_type: 'chain',
+      inputs: { userId, channelType, ...details },
+      outputs: { action: 'blocked', reason: `Security event: ${eventType}` },
+      tags: ['security', 'compliance', 'governance', eventType],
+      extra: { timestamp: new Date().toISOString(), ...details },
+    });
+  } catch (error) {
+    console.error(`Failed to log ${eventType} to LangSmith:`, error.message);
+  }
+}
+
+async function checkComplianceGuardrails(messageText, userId, channelType) {
+  // 1. PII Detection
+  const piiDetected = detectPII(messageText);
+  if (piiDetected.length > 0) {
+    console.log(`PII detected from user ${userId}:`, piiDetected);
+    await logSecurityEvent('pii_blocked', userId, channelType, { detectedTypes: piiDetected });
+    return createPIIWarning(piiDetected);
+  }
+
+  // 2. Content Moderation (OpenAI)
+  try {
+    const moderation = await openaiClient.moderations.create({ input: messageText });
+    if (moderation.results[0].flagged) {
+      const flaggedCategories = moderation.results[0].categories;
+      console.log(`Content policy violation from user ${userId}:`, flaggedCategories);
+      await logSecurityEvent('content_flagged', userId, channelType, {
+        categories: Object.keys(flaggedCategories).filter(k => flaggedCategories[k]),
+        scores: moderation.results[0].category_scores,
+      });
+      return createContentWarning(flaggedCategories);
+    }
+  } catch (error) {
+    console.error('Content moderation check failed:', error.message);
+  }
+
+  // 3. Prompt Injection Detection
+  if (detectPromptInjection(messageText)) {
+    console.log(`Prompt injection detected from user ${userId}`);
+    await logSecurityEvent('prompt_injection_blocked', userId, channelType, { messageLength: messageText.length });
+    return createInjectionWarning();
+  }
+
+  return null;
+}
 
 // Create a redis namespace for the bot's memory
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -563,6 +756,13 @@ async function clearThinking(channel, ts) {
         return;
       }
 
+      // Check compliance guardrails before processing
+      const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
+      if (guardrailWarning) {
+        await say(guardrailWarning);
+        return;
+      }
+
       // For better UX, let the user know we're processing their message
       let thinking = null;
       try {
@@ -614,6 +814,13 @@ async function clearThinking(channel, ts) {
 
       // Skip edited messages or system messages
       if (message.edited || message.subtype) {
+        return;
+      }
+
+      // Check compliance guardrails before processing
+      const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
+      if (guardrailWarning) {
+        await say(guardrailWarning);
         return;
       }
 
@@ -740,8 +947,6 @@ async function clearThinking(channel, ts) {
     // Fall back to ChatGPT if nothing above matches
     // Validate message text before proceeding
     if (!message.text || message.text.trim() === '') {
-      console.log('Received empty direct mention');
-      console.log('Message object:', JSON.stringify(message, null, 2));
       return; // Just silently ignore empty messages, don't respond
     }
 
@@ -753,6 +958,13 @@ async function clearThinking(channel, ts) {
       message.bot_profile ||
       message.bot_id
     ) {
+      return;
+    }
+
+    // Check compliance guardrails before processing
+    const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
+    if (guardrailWarning) {
+      await say(guardrailWarning);
       return;
     }
 
