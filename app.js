@@ -303,10 +303,6 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
     // Get current conversation length for metadata
     const messages = await chatHistory.getMessages();
     const conversationLength = messages.length;
-
-    // Log for debugging
-    console.log('Invoking chain with input:', userInput);
-    console.log('Current conversation length:', conversationLength);
     
     // Invoke the LangChain conversation chain
     const response = await chain.invoke(
@@ -414,49 +410,26 @@ async function clearThinking(channel, ts) {
     // Use these sparingly and be sure your match is not too broad.
     ///////////////////////////////////////////////////////////////
 
-    console.log('[GENERAL] Received message:', {
-      channel_type: message?.channel_type,
-      has_text: !!message?.text,
-      text_preview: message?.text?.substring(0, 50),
-      has_subtype: !!message?.subtype,
-      subtype: message?.subtype,
-      bot_id: message?.bot_id,
-    });
-
     // Safeguard against undefined messages
     if (!message) {
-      console.log('Received undefined message');
       return;
     }
 
     // Skip if this is a direct mention, we'll handle those separately
     // to avoid duplicate responses
     if (context.botUserId && message.text && message.text.includes(`<@${context.botUserId}>`)) {
-      console.log('Skipping direct mention in general handler');
       return;
     }
 
     // Skip message changed/deleted events and other special types
     if (message.subtype) {
-      console.log(`Skipping message with subtype: ${message.subtype}`);
       return;
     }
 
     // Skip bot messages
     if (message.bot_id) {
-      console.log('Skipping message from a bot');
       return;
     }
-
-    // Log message for debugging
-    console.log('Processing message:', {
-      channel_type: message.channel_type,
-      has_text: !!message.text,
-      text_length: message.text ? message.text.length : 0,
-      has_blocks: !!message.blocks,
-      has_attachments: !!message.attachments,
-      user: message.user,
-    });
 
     // Responds any message containing 'i love you' with 'i know'
     if (message.text && message.text.match(/i love you/i)) {
@@ -576,50 +549,33 @@ async function clearThinking(channel, ts) {
     if (message.channel_type === 'im') {
       // Validate message text before proceeding
       if (!message.text || message.text.trim() === '') {
-        console.log('Received empty message in DM');
-        console.log('Message object:', JSON.stringify(message, null, 2));
         return; // Just silently ignore empty messages, don't respond
       }
 
       // Skip messages from bots
       if (message.bot_id) {
-        console.log('Skipping message from a bot in DM');
         return;
       }
 
       // Skip edited messages, thread replies, or messages that are clearly system events
       if (message.edited || message.subtype) {
-        console.log('Skipping edited or special message in DM');
         return;
       }
-
-      // Log the full message for debugging
-      console.log('Processing DM message:', JSON.stringify(message, null, 2));
 
       // For better UX, let the user know we're processing their message
       let thinking = null;
       try {
         thinking = await postThinking(say);
 
-        // Get response from OpenAI (now returns { response, runId })
-        const handlerResult = await handleMessage(message.text, message.user, message.channel_type);
-        
-        console.log('[DM] handleMessage result type:', typeof handlerResult);
-        
-        // Extract response and runId from result
-        const responseText = typeof handlerResult === 'string' ? handlerResult : (handlerResult?.response || handlerResult);
-        const runId = typeof handlerResult === 'object' ? handlerResult?.runId : null;
-        
-        console.log('[DM] Extracted responseText length:', responseText ? responseText.length : 'undefined');
-        console.log('[DM] Extracted runId:', runId);
+        // Get response from OpenAI (returns { response, runId })
+        const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
           await clearThinking(message.channel, thinking.ts);
         }
 
-        // ALWAYS show buttons (we'll fix runId capture later)
-        console.log('[DM] Sending response with feedback buttons');
+        // Send response with feedback buttons
         const truncatedText = responseText.length > 2900 ? responseText.substring(0, 2900) + '...' : responseText;
         
         await say({
@@ -627,8 +583,7 @@ async function clearThinking(channel, ts) {
           blocks: createFeedbackBlocks(truncatedText, runId || 'pending'),
         });
       } catch (error) {
-        console.error('[DM] ERROR:', error);
-        console.error('[DM] ERROR stack:', error.stack);
+        console.error('Error in DM handler:', error);
 
         // Clean up thinking message if it exists
         if (thinking && thinking.ts) {
@@ -646,7 +601,6 @@ async function clearThinking(channel, ts) {
     if (message.channel_type === 'mpim') {
       // Ignore messages from bots
       if (message.bot_id) {
-        console.log('Ignoring message from a bot in MPIM');
         return;
       }
 
@@ -659,19 +613,15 @@ async function clearThinking(channel, ts) {
 
       // Skip edited messages or system messages
       if (message.edited || message.subtype) {
-        console.log('Skipping edited or special message in MPIM');
         return;
       }
-
-      // Log the full message for debugging
-      console.log('Processing MPIM message:', JSON.stringify(message, null, 2));
 
       // For better UX, let the user know we're processing their message
       let thinking = null;
       try {
         thinking = await postThinking(say);
 
-        // Get response from OpenAI (now returns { response, runId })
+        // Get response from OpenAI
         const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
@@ -679,16 +629,11 @@ async function clearThinking(channel, ts) {
           await clearThinking(message.channel, thinking.ts);
         }
 
-        // Send the actual response with feedback buttons if we have a run ID
-        if (runId) {
-          await say({
-            text: responseText,
-            blocks: createFeedbackBlocks(responseText, runId),
-          });
-        } else {
-          // Fallback to plain text if no run ID
-          await say(responseText);
-        }
+        // Send the response with feedback buttons
+        await say({
+          text: responseText,
+          blocks: createFeedbackBlocks(responseText, runId),
+        });
       } catch (error) {
         console.error('Error in MPIM message processing:', error);
 
@@ -715,23 +660,13 @@ async function clearThinking(channel, ts) {
 
     // Safeguard against undefined messages
     if (!message) {
-      console.log('Received undefined direct mention message');
       return;
     }
 
     // Skip message changed/deleted events and other special types
     if (message.subtype) {
-      console.log(`Skipping direct mention with subtype: ${message.subtype}`);
       return;
     }
-
-    // Log direct mention for debugging
-    console.log('Processing direct mention:', {
-      channel_type: message.channel_type,
-      has_text: !!message.text,
-      text_length: message.text ? message.text.length : 0,
-      user: message.user,
-    });
 
     // Show the help and usage instructions
     if (message.text && message.text.toLowerCase().includes('help')) {
@@ -817,19 +752,15 @@ async function clearThinking(channel, ts) {
       message.bot_profile ||
       message.bot_id
     ) {
-      console.log('Skipping special message in direct mention:', Object.keys(message));
       return;
     }
-
-    // Log the full message for debugging
-    console.log('Processing direct mention:', JSON.stringify(message, null, 2));
 
     // For better UX, let the user know we're processing their message
     let thinking = null;
     try {
       thinking = await postThinking(say);
 
-      // Get response from OpenAI (now returns { response, runId })
+      // Get response from OpenAI
       const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
 
       // Delete the thinking message
@@ -837,16 +768,11 @@ async function clearThinking(channel, ts) {
         await clearThinking(message.channel, thinking.ts);
       }
 
-      // Send the actual response with feedback buttons if we have a run ID
-      if (runId) {
-        await say({
-          text: responseText,
-          blocks: createFeedbackBlocks(responseText, runId),
-        });
-      } else {
-        // Fallback to plain text if no run ID
-        await say(responseText);
-      }
+      // Send the response with feedback buttons
+      await say({
+        text: responseText,
+        blocks: createFeedbackBlocks(responseText, runId),
+      });
     } catch (error) {
       console.error('Error in direct mention processing:', error);
 
@@ -872,8 +798,8 @@ async function clearThinking(channel, ts) {
       
       console.log(`Positive feedback received for run ${runId} from user ${userId}`);
       
-      // Only submit to LangSmith if we have a valid UUID
-      if (runId && runId !== 'pending' && runId !== 'test-run-123' && runId.length > 20) {
+      // Only submit to LangSmith if we have a valid run ID
+      if (runId) {
         try {
           await langsmithClient.createFeedback(runId, runId, {
             key: 'user-feedback',
@@ -881,12 +807,10 @@ async function clearThinking(channel, ts) {
             value: 'positive',
             comment: 'User found response helpful',
           });
-          console.log('[Feedback] Successfully submitted to LangSmith');
+          console.log('Positive feedback submitted for run:', runId);
         } catch (error) {
-          console.error('[Feedback] Failed to submit to LangSmith:', error.message);
+          console.error('Failed to submit feedback:', error.message);
         }
-      } else {
-        console.log('[Feedback] Skipping LangSmith submission (no valid runId)');
       }
       
       // Update the message to show feedback was recorded
@@ -923,8 +847,8 @@ async function clearThinking(channel, ts) {
       
       console.log(`Negative feedback received for run ${runId} from user ${userId}`);
       
-      // Only submit to LangSmith if we have a valid UUID
-      if (runId && runId !== 'pending' && runId !== 'test-run-123' && runId.length > 20) {
+      // Only submit to LangSmith if we have a valid run ID
+      if (runId) {
         try {
           await langsmithClient.createFeedback(runId, runId, {
             key: 'user-feedback',
@@ -932,12 +856,10 @@ async function clearThinking(channel, ts) {
             value: 'negative',
             comment: 'User found response not helpful',
           });
-          console.log('[Feedback] Successfully submitted to LangSmith');
+          console.log('Negative feedback submitted for run:', runId);
         } catch (error) {
-          console.error('[Feedback] Failed to submit to LangSmith:', error.message);
+          console.error('Failed to submit feedback:', error.message);
         }
-      } else {
-        console.log('[Feedback] Skipping LangSmith submission (no valid runId)');
       }
       
       // Update the message to show feedback was recorded
