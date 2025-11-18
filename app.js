@@ -119,6 +119,16 @@ const PII_PATTERNS = {
   phone: /\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g,
 };
 
+// Redact PII from text for safe logging
+function redactPII(text) {
+  let redacted = text;
+  redacted = redacted.replace(PII_PATTERNS.ssn, '***-**-****');
+  redacted = redacted.replace(PII_PATTERNS.credit_card, '**** **** **** ****');
+  redacted = redacted.replace(PII_PATTERNS.email, '****@****.***');
+  redacted = redacted.replace(PII_PATTERNS.phone, '***-***-****');
+  return redacted;
+}
+
 // Prompt Injection Detection Patterns
 const INJECTION_PATTERNS = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|directions?|commands?)/i,
@@ -245,28 +255,17 @@ function createInjectionWarning() {
   };
 }
 
-async function logSecurityEvent(eventType, userId, channelType, details = {}) {
-  try {
-    await langsmithClient.createRun({
-      name: eventType,
-      run_type: 'chain',
-      inputs: { userId, channelType, ...details },
-      outputs: { action: 'blocked', reason: `Security event: ${eventType}` },
-      tags: ['security', 'compliance', 'governance', eventType],
-      extra: { timestamp: new Date().toISOString(), ...details },
-    });
-  } catch (error) {
-    console.error(`Failed to log ${eventType} to LangSmith:`, error.message);
-  }
-}
-
-async function checkComplianceGuardrails(messageText, userId, channelType) {
+// Internal function that does the actual detection (not traced)
+async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
   // 1. PII Detection
   const piiDetected = detectPII(messageText);
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
-    await logSecurityEvent('pii_blocked', userId, channelType, { detectedTypes: piiDetected });
-    return createPIIWarning(piiDetected);
+    return {
+      warning: createPIIWarning(piiDetected),
+      eventType: 'pii_blocked',
+      detectedTypes: piiDetected,
+    };
   }
 
   // 2. Content Moderation (OpenAI)
@@ -275,11 +274,12 @@ async function checkComplianceGuardrails(messageText, userId, channelType) {
     if (moderation.results[0].flagged) {
       const flaggedCategories = moderation.results[0].categories;
       console.log(`Content policy violation from user ${userId}:`, flaggedCategories);
-      await logSecurityEvent('content_flagged', userId, channelType, {
+      return {
+        warning: createContentWarning(flaggedCategories),
+        eventType: 'content_flagged',
         categories: Object.keys(flaggedCategories).filter(k => flaggedCategories[k]),
         scores: moderation.results[0].category_scores,
-      });
-      return createContentWarning(flaggedCategories);
+      };
     }
   } catch (error) {
     console.error('Content moderation check failed:', error.message);
@@ -288,12 +288,42 @@ async function checkComplianceGuardrails(messageText, userId, channelType) {
   // 3. Prompt Injection Detection
   if (detectPromptInjection(messageText)) {
     console.log(`Prompt injection detected from user ${userId}`);
-    await logSecurityEvent('prompt_injection_blocked', userId, channelType, { messageLength: messageText.length });
-    return createInjectionWarning();
+    return {
+      warning: createInjectionWarning(),
+      eventType: 'prompt_injection_blocked',
+      messageLength: messageText.length,
+    };
   }
 
   return null;
 }
+
+// Traced wrapper that only logs redacted data
+const checkComplianceGuardrails = traceable(
+  async function checkComplianceGuardrails(input) {
+    // Input is a single object with redacted text - safe for LangSmith logging
+    const { redactedText, userId, channelType, eventType, eventDetails } = input;
+    
+    return {
+      blocked: true,
+      eventType,
+      userId,
+      channelType,
+      messageLength: redactedText?.length || 0,
+      ...eventDetails,
+    };
+  },
+  {
+    name: 'compliance_check',
+    tags: ['security', 'compliance', 'governance'],
+    metadata: (input) => ({
+      userId: input.userId,
+      channelType: input.channelType,
+      eventType: input.eventType || 'unknown',
+      messageLength: input.redactedText?.length || 0,
+    }),
+  }
+);
 
 // Create a redis namespace for the bot's memory
 const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
@@ -757,9 +787,18 @@ async function clearThinking(channel, ts) {
       }
 
       // Check compliance guardrails before processing
-      const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
-      if (guardrailWarning) {
-        await say(guardrailWarning);
+      const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
+      if (guardrailResult) {
+        // Log redacted version to LangSmith
+        await checkComplianceGuardrails({
+          redactedText: redactPII(message.text),
+          userId: message.user,
+          channelType: message.channel_type,
+          eventType: guardrailResult.eventType,
+          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+        });
+        
+        await say(guardrailResult.warning);
         return;
       }
 
@@ -818,9 +857,18 @@ async function clearThinking(channel, ts) {
       }
 
       // Check compliance guardrails before processing
-      const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
-      if (guardrailWarning) {
-        await say(guardrailWarning);
+      const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
+      if (guardrailResult) {
+        // Log redacted version to LangSmith
+        await checkComplianceGuardrails({
+          redactedText: redactPII(message.text),
+          userId: message.user,
+          channelType: message.channel_type,
+          eventType: guardrailResult.eventType,
+          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+        });
+        
+        await say(guardrailResult.warning);
         return;
       }
 
@@ -962,9 +1010,18 @@ async function clearThinking(channel, ts) {
     }
 
     // Check compliance guardrails before processing
-    const guardrailWarning = await checkComplianceGuardrails(message.text, message.user, message.channel_type);
-    if (guardrailWarning) {
-      await say(guardrailWarning);
+    const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
+    if (guardrailResult) {
+      // Log redacted version to LangSmith
+      await checkComplianceGuardrails({
+        redactedText: redactPII(message.text),
+        userId: message.user,
+        channelType: message.channel_type,
+        eventType: guardrailResult.eventType,
+        eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+      });
+      
+      await say(guardrailResult.warning);
       return;
     }
 
