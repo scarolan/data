@@ -12,9 +12,10 @@
 // THINKING_MESSAGE - (optional) customize the "thinking" message shown while processing
 //                   if not set, a default Star Trek Data themed message is used
 //
-// Note: The /dalle slash command uses an asynchronous approach to handle
-// Slack timeout limitations, generating the image in the background and
-// posting directly to the channel when complete.
+// Features:
+// - Interactive feedback buttons with modal for detailed negative feedback
+// - LangSmith integration for observability and RLHF feedback collection
+// - DALL-E image generation via /dalle slash command (async pattern)
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
@@ -837,24 +838,155 @@ async function clearThinking(channel, ts) {
     }
   });
 
-  // Handle feedback button clicks - Negative feedback
+  // Handle feedback button clicks - Negative feedback (opens modal)
   app.action('feedback_negative', async ({ ack, body, client }) => {
     await ack();
     
     try {
       const runId = body.actions[0].value;
-      const userId = body.user.id;
       
-      console.log(`Negative feedback received for run ${runId} from user ${userId}`);
+      console.log(`Opening feedback modal for run ${runId}`);
       
-      // Only submit to LangSmith if we have a valid run ID
+      // Open a modal for detailed feedback
+      await client.views.open({
+        trigger_id: body.trigger_id,
+        view: {
+          type: 'modal',
+          callback_id: 'feedback_modal',
+          private_metadata: JSON.stringify({
+            runId,
+            channelId: body.channel.id,
+            messageTs: body.message.ts,
+            messageText: body.message.text,
+            messageBlocks: body.message.blocks,
+          }),
+          title: {
+            type: 'plain_text',
+            text: 'Feedback',
+          },
+          submit: {
+            type: 'plain_text',
+            text: 'Submit',
+          },
+          close: {
+            type: 'plain_text',
+            text: 'Cancel',
+          },
+          blocks: [
+            {
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'Help us improve! What could have been better?',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'feedback_categories',
+              optional: true,
+              element: {
+                type: 'checkboxes',
+                action_id: 'categories',
+                options: [
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Inaccurate information',
+                    },
+                    value: 'inaccurate',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Not helpful',
+                    },
+                    value: 'unhelpful',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Off-topic or irrelevant',
+                    },
+                    value: 'off_topic',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Too verbose',
+                    },
+                    value: 'verbose',
+                  },
+                  {
+                    text: {
+                      type: 'plain_text',
+                      text: 'Other',
+                    },
+                    value: 'other',
+                  },
+                ],
+              },
+              label: {
+                type: 'plain_text',
+                text: 'What went wrong? (optional)',
+              },
+            },
+            {
+              type: 'input',
+              block_id: 'feedback_text',
+              optional: true,
+              element: {
+                type: 'plain_text_input',
+                action_id: 'comment',
+                multiline: true,
+                placeholder: {
+                  type: 'plain_text',
+                  text: 'Additional details (optional)',
+                },
+              },
+              label: {
+                type: 'plain_text',
+                text: 'Tell us more',
+              },
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      console.error('Error opening feedback modal:', error);
+    }
+  });
+
+  // Handle feedback modal submission
+  app.view('feedback_modal', async ({ ack, body, view, client }) => {
+    await ack();
+    
+    try {
+      const metadata = JSON.parse(view.private_metadata);
+      const { runId, channelId, messageTs, messageText, messageBlocks } = metadata;
+      
+      // Extract form values
+      const categories = view.state.values.feedback_categories?.categories?.selected_options?.map(opt => opt.value) || [];
+      const comment = view.state.values.feedback_text?.comment?.value || '';
+      
+      // Build feedback comment from categories and text
+      let feedbackComment = 'User found response not helpful';
+      if (categories.length > 0) {
+        feedbackComment += `. Issues: ${categories.join(', ')}`;
+      }
+      if (comment) {
+        feedbackComment += `. Details: ${comment}`;
+      }
+      
+      console.log(`Negative feedback for run ${runId}:`, feedbackComment);
+      
+      // Submit to LangSmith if we have a valid run ID
       if (runId) {
         try {
           await langsmithClient.createFeedback(runId, runId, {
             key: 'user-feedback',
             score: 0,
             value: 'negative',
-            comment: 'User found response not helpful',
+            comment: feedbackComment,
           });
           console.log('Negative feedback submitted for run:', runId);
         } catch (error) {
@@ -862,12 +994,12 @@ async function clearThinking(channel, ts) {
         }
       }
       
-      // Update the message to show feedback was recorded
-      const originalBlocks = body.message.blocks.slice(0, -1); // Remove button block
+      // Update the original message to show feedback was recorded
+      const originalBlocks = messageBlocks.slice(0, -1); // Remove button block
       await client.chat.update({
-        channel: body.channel.id,
-        ts: body.message.ts,
-        text: body.message.text,
+        channel: channelId,
+        ts: messageTs,
+        text: messageText,
         blocks: [
           ...originalBlocks,
           {
@@ -882,7 +1014,7 @@ async function clearThinking(channel, ts) {
         ],
       });
     } catch (error) {
-      console.error('Error handling negative feedback:', error);
+      console.error('Error handling feedback modal submission:', error);
     }
   });
 
