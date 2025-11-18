@@ -59,6 +59,7 @@ import { RunnableSequence } from '@langchain/core/runnables';
 import { BufferWindowMemory } from '@langchain/classic/memory';
 import { RedisChatMessageHistory } from '@langchain/community/stores/message/ioredis';
 import { traceable } from 'langsmith/traceable';
+import { getCurrentRunTree } from 'langsmith/singletons/traceable';
 import { Client } from 'langsmith';
 import OpenAI from 'openai';
 import Redis from 'ioredis';
@@ -332,8 +333,17 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
     const chatHistoryKey = `chat:${userId}`;
     await redisClient.expire(chatHistoryKey, memoryTtlSeconds);
 
-    // Return both response and a placeholder runId (we'll capture real ID later)
-    return { response, runId: null };
+    // Capture the run ID from LangSmith trace context
+    // getCurrentRunTree() accesses the current run tree from AsyncLocalStorage
+    let runId = null;
+    try {
+      const currentRunTree = getCurrentRunTree(true); // true = permitAbsentRunTree (don't throw if missing)
+      runId = currentRunTree?.id || null;
+    } catch (err) {
+      console.log('Could not capture run ID:', err.message);
+    }
+
+    return { response, runId };
   } catch (error) {
     console.error('Error in handleMessage:', error);
 
@@ -344,7 +354,6 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
 
     // Generic error message for other issues
     return { response: 'My neural pathways are experiencing a malfunction. Please try again.', runId: null };
-    return 'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
   }
 }, { 
   name: 'handleMessage', 
