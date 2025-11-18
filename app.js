@@ -506,6 +506,19 @@ const generateImage = traceable(async function generateImage(prompt) {
 // Returns both the response text and the LangSmith run ID for feedback tracking
 const handleMessage = traceable(async function handleMessage(userInput, userId, channelType = 'unknown') {
   try {
+    // Set thread metadata on the current run tree for LangSmith threads grouping
+    const runTree = getCurrentRunTree();
+    if (runTree) {
+      runTree.extra.metadata = {
+        ...runTree.extra.metadata,
+        thread_id: userId,
+        session_id: userId,
+        conversation_id: userId,
+        userId: userId,
+        channelType: channelType,
+      };
+    }
+    
     // Check if input is null or undefined
     if (!userInput) {
       console.log('Received null or undefined input');
@@ -581,12 +594,7 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
   // processInputs transforms the logged inputs for LangSmith display
   // With 3 parameters, default format is { args: [param1, param2, param3] }
   // We extract just the user's message text for clean display
-  processInputs: (inputs) => ({ input: inputs.args[0] }),
-  // Store userId and channelType in metadata instead
-  metadata: (userInput, userId, channelType) => ({
-    userId,
-    channelType
-  })
+  processInputs: (inputs) => ({ input: inputs.args[0] })
 });
 
 // Helper: post a consistent "thinking" message with the configured context text
