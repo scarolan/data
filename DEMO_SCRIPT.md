@@ -60,6 +60,8 @@ Agenda slide with checkboxes:
 - Redis-backed conversation memory with 24-hour TTL
 - BufferWindowMemory keeps last 10 exchanges
 
+**Why buy LangChain**: LangChain includes all the functions and methods you need to build an enterprise-grade AI agent—conversation memory, context management, and error handling are built-in, saving you months of development time.
+
 ---
 
 ### **Section 2: User Feedback Loop (RLHF)** (3 min)
@@ -90,6 +92,8 @@ Agenda slide with checkboxes:
 - Real run IDs captured via `getCurrentRunTree()`
 - Enables continuous improvement based on real user interactions
 - Humor makes the demo memorable and relatable
+
+**Why buy LangChain**: LangSmith's built-in feedback collection turns every user interaction into training data, giving you a continuous improvement pipeline that most companies spend months building from scratch.
 
 ---
 
@@ -145,6 +149,8 @@ Agenda slide with checkboxes:
 - Security team can review all injection attempts
 - Tagged with `prompt_injection_blocked` for security analytics
 
+**Why buy LangChain**: LangSmith provides the compliance observability that enterprises require—automated PII redaction, audit trails, and security event logging that satisfy CISO requirements and regulatory audits out of the box.
+
 ---
 
 ### **Section 4: LangSmith Threads & Analytics** (3 min)
@@ -170,6 +176,8 @@ Agenda slide with checkboxes:
 - Thread-level cost tracking and analytics
 - Searchable by tags for security/compliance review
 - User ID-based grouping for debugging
+
+**Why buy LangChain**: LangSmith's thread-level debugging and analytics eliminate the "black box" problem—you can trace every conversation, track costs per user, and instantly diagnose issues that would take days to debug without proper observability.
 
 ---
 
