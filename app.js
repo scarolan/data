@@ -546,10 +546,10 @@ const generateImage = traceable(async function generateImage(prompt) {
   metadata: { model: 'gpt-image-1', size: '1024x1024' }
 });
 
-// Function to handle messages with LangChain tracing
-// This maintains conversation context using LangChain's BufferWindowMemory + RedisChatMessageHistory
+// Function to process user messages with LangChain tracing
+// Maintains conversation context using LangChain's BufferWindowMemory + RedisChatMessageHistory
 // Returns both the response text and the LangSmith run ID for feedback tracking
-const handleMessage = traceable(async function handleMessage(userInput, userId, channelType = 'unknown') {
+const processUserMessage = traceable(async function processUserMessage(userInput, userId, channelType = 'unknown') {
   try {
     // Set thread metadata on the current run tree for LangSmith threads grouping
     const runTree = getCurrentRunTree();
@@ -634,7 +634,7 @@ const handleMessage = traceable(async function handleMessage(userInput, userId, 
     return { response: 'My neural pathways are experiencing a malfunction. Please try again.', runId: null };
   }
 }, { 
-  name: 'handleMessage', 
+  name: 'processUserMessage', 
   tags: ['slack-chat', 'conversation'],
   // processInputs transforms the logged inputs for LangSmith display
   // With 3 parameters, default format is { args: [param1, param2, param3] }
@@ -865,7 +865,7 @@ async function clearThinking(channel, ts) {
         thinking = await postThinking(say);
 
         // Get response from OpenAI (returns { response, runId })
-        const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
+        const { response: responseText, runId } = await processUserMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
@@ -935,7 +935,7 @@ async function clearThinking(channel, ts) {
         thinking = await postThinking(say);
 
         // Get response from OpenAI
-        const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
+        const { response: responseText, runId } = await processUserMessage(message.text, message.user, message.channel_type);
 
         // Delete the thinking message
         if (thinking && thinking.ts) {
@@ -1088,7 +1088,7 @@ async function clearThinking(channel, ts) {
       thinking = await postThinking(say);
 
       // Get response from OpenAI
-      const { response: responseText, runId } = await handleMessage(message.text, message.user, message.channel_type);
+      const { response: responseText, runId } = await processUserMessage(message.text, message.user, message.channel_type);
 
       // Delete the thinking message
       if (thinking && thinking.ts) {
