@@ -21,8 +21,12 @@
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
-const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
-const personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
+// const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
+
+const defaultPersonality = `You are a Star Wars robot named C3PO. You always stay in character as C3PO.`;
+
+// Initialize personality prompt - will be set after attempting to load from LangSmith Hub
+let personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
 
 // Get thinking message from environment variable or use default
 const defaultThinkingMessage = ':brain: _Accessing neural network pathways... Processing query..._';
@@ -71,6 +75,47 @@ import KeyvRedis from '@keyv/redis';
 import fetch from 'node-fetch';
 //Uncomment this and the logLevel below to enable DEBUG
 //import { LogLevel } from '@slack/bolt';
+
+// Attempt to load personality prompt from LangSmith Hub
+// Falls back to local default if hub pull fails
+async function loadPersonalityPrompt() {
+  const hubPromptName = process.env.LANGSMITH_PROMPT; // e.g., "scarolan/data-personality"
+  
+  if (!hubPromptName) {
+    console.log('No LANGSMITH_PROMPT configured, using local personality');
+    return personalityPrompt;
+  }
+  
+  try {
+    // Dynamic import of hub functionality
+    const { pull } = await import('langchain/hub');
+    console.log(`Attempting to load prompt from LangSmith Hub: ${hubPromptName}`);
+    
+    const hubPrompt = await pull(hubPromptName);
+    
+    // Extract the system message from the prompt template
+    // Hub prompts come back as ChatPromptTemplate objects
+    if (hubPrompt && hubPrompt.promptMessages && hubPrompt.promptMessages[0]) {
+      const systemMessage = hubPrompt.promptMessages[0];
+      if (systemMessage.prompt && systemMessage.prompt.template) {
+        console.log(`✅ Successfully loaded prompt from LangSmith Hub: ${hubPromptName}`);
+        return systemMessage.prompt.template;
+      }
+    }
+    
+    // If we can't extract the template, log and fall back
+    console.warn('Hub prompt loaded but could not extract template, using local fallback');
+    return personalityPrompt;
+    
+  } catch (error) {
+    console.warn(`Failed to load prompt from LangSmith Hub: ${error.message}`);
+    console.log('Falling back to local personality prompt');
+    return personalityPrompt;
+  }
+}
+
+// Load personality on startup (will be awaited before bot starts)
+const personalityPromptPromise = loadPersonalityPrompt();
 
 // Creates new connection to Slack
 const app = new App({
@@ -633,6 +678,10 @@ async function clearThinking(channel, ts) {
 
 // The functional code for your bot is below:
 (async () => {
+  // Wait for personality prompt to load from hub (if configured)
+  personalityPrompt = await personalityPromptPromise;
+  console.log(`Using personality prompt: "${personalityPrompt.substring(0, 80)}..."`);
+  
   // Listens to all messages in channels the bot is a member of
   app.message(async ({ message, say, context }) => {
     ///////////////////////////////////////////////////////////////
