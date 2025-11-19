@@ -40,7 +40,35 @@ Agenda slide with checkboxes:
 
 ## 📋 Demo Sections (17 minutes)
 
-### **Section 1: Basic Interaction & Memory** (3 min)
+### **Section 0: Setting the Stage – ComicCon & Data** (2 min)
+**Goal**: Introduce the scenario and show off the repo/packages
+
+**Talk track**:
+- *"You are on the app team for ComicCon NYC, and you've been tasked to build an LLM chatbot based on the personality of Data, the android from Star Trek. Data will be the virtual AI assistant for attendees, answering questions, sharing schedules, and more. With just a few lines of LangChain code, Data is fully instrumented for enterprise features—memory, tracing, compliance, and feedback—making advanced AI easy to deploy and operate."*
+- *"Let's look at the code behind Data. In `app.js`, you’ll see how a few key packages—LangChain, LangSmith, Redis, and Slack Bolt—do the heavy lifting. These aren’t just wrappers; they save months of engineering time by providing memory, tracing, compliance, and feedback out of the box."*
+
+**Actions**:
+1. Show the GitHub repo and open `app.js`.
+2. Highlight the import section and call out the most useful packages.
+3. Briefly explain what each package does and why it matters for production AI.
+
+**Mini Demo**:
+1. Send: *"Hello Data, we're super excited to meet you and be here."*
+2. Send: *"What's on the schedule for today?"*
+3. Update Data's prompt in LangSmith (e.g., add new event info or change personality) and restart the bot.
+4. Ask the question again to show instant prompt iteration.
+5. Show the trace in LangSmith, pointing out how the prompt change is reflected.
+
+**Key points**:
+- Rapid prompt iteration—change Data’s behavior instantly, no redeploy needed
+- LangSmith traces show exactly what changed and when
+- Packages do the hard work: memory, tracing, compliance, feedback
+
+**Why buy LangChain/LangSmith**: You get a full AI platform, not just a wrapper. Rapid iteration, observability, and governance are built-in, saving you months of work.
+
+---
+
+### **Section 1: Basic Interaction & Memory** (2 min)
 **Goal**: Show the bot works and has conversation memory
 
 **Actions**:
