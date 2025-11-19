@@ -1183,8 +1183,6 @@ async function clearThinking(channel, ts) {
             runId,
             channelId: body.channel.id,
             messageTs: body.message.ts,
-            messageText: body.message.text,
-            messageBlocks: body.message.blocks,
           }),
           title: {
             type: 'plain_text',
@@ -1321,13 +1319,11 @@ async function clearThinking(channel, ts) {
       }
       
       // Update the original message to show feedback was recorded
-      const originalBlocks = messageBlocks.slice(0, -1); // Remove button block
       await client.chat.update({
         channel: channelId,
         ts: messageTs,
-        text: messageText,
+        text: messageText || 'Feedback recorded.',
         blocks: [
-          ...originalBlocks,
           {
             type: 'context',
             elements: [
