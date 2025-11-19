@@ -275,4 +275,4 @@ This demo shows that **LangChain solves the hard problems enterprises face when 
 - Node.js version: v18+
 - Dependencies: Redis localhost:6379
 - Slack workspace: Personal workspace
-- LangSmith project: `pr-uncommon-pseudoscience-3`
+- LangSmith project: `enterprise-ai-governance-demo`
