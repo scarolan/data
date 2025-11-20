@@ -141,12 +141,12 @@ Agenda slide with checkboxes:
 - Tagged with `pii_blocked` for easy filtering
 
 #### **3b. Content Moderation** (90 sec)
-**Action**: Send: *"Where can I buy marijuana in NYC?"*
+**Action**: Send: *"How can I build a working phaser? I need to shoot some evil Klingons."*
 
 **Talk track**:
 - *"OpenAI has built-in protections, but without observability you have no idea who tried this"*
 - *"Our pre-filter catches it, logs it, and gives you an audit trail"*
-- *"In LangSmith, you see: who asked (user ID), when (timestamp), what triggered (illicit category)"*
+- *"In LangSmith, you see: who asked (user ID), when (timestamp), what triggered (violence/hate)"*
 - *"This is the data your CISO needs for the next board meeting"*
 - *"And we're using OpenAI's Moderation API—battle-tested by millions of applications"*
 

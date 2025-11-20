@@ -850,6 +850,12 @@ async function clearThinking(channel, ts) {
       return;
     }
 
+    // Demo closing statement trigger
+    if (message.text && message.text.match(/make it so/i)) {
+      await say("Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared compliance reports for three regulatory frameworks. This efficiency is... most satisfactory. Live long and prosper. 🖖");
+      return;
+    }
+
     // If the user is in a DM, respond to the message with ChatGPT
     if (message.channel_type === 'im') {
       // Validate message text before proceeding
