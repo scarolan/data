@@ -351,20 +351,26 @@ const checkComplianceGuardrails = traceable(
     // Input is a single object with redacted text - safe for LangSmith logging
     const { redactedText, userId, channelType, eventType, eventDetails } = input;
     
-    // Determine specific tags based on violation type
-    let specificTags = [];
-    switch (eventType) {
-      case 'pii_blocked':
-        specificTags = ['pii', 'data-protection', 'privacy'];
-        break;
-      case 'content_flagged':
-        specificTags = ['content-moderation', 'safety', 'policy'];
-        break;
-      case 'prompt_injection_blocked':
-        specificTags = ['security', 'injection', 'threat'];
-        break;
-      default:
-        specificTags = ['security'];
+    // Get the current run tree and add specific tags based on violation type
+    const runTree = getCurrentRunTree();
+    if (runTree) {
+      let specificTags = [];
+      switch (eventType) {
+        case 'pii_blocked':
+          specificTags = ['pii', 'data-protection', 'privacy'];
+          break;
+        case 'content_flagged':
+          specificTags = ['content-moderation', 'safety', 'policy'];
+          break;
+        case 'prompt_injection_blocked':
+          specificTags = ['security', 'injection', 'threat'];
+          break;
+        default:
+          specificTags = ['security'];
+      }
+      
+      // Add the specific tags to the existing tags
+      runTree.tags = [...(runTree.tags || []), ...specificTags];
     }
     
     return {
@@ -373,7 +379,6 @@ const checkComplianceGuardrails = traceable(
       userId,
       channelType,
       messageLength: redactedText?.length || 0,
-      tags: specificTags, // Include tags in output for visibility
       ...eventDetails,
     };
   },
