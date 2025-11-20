@@ -351,33 +351,35 @@ const checkComplianceGuardrails = traceable(
     // Input is a single object with redacted text - safe for LangSmith logging
     const { redactedText, userId, channelType, eventType, eventDetails } = input;
     
+    // Determine specific tags based on violation type
+    let specificTags = [];
+    switch (eventType) {
+      case 'pii_blocked':
+        specificTags = ['pii', 'data-protection', 'privacy'];
+        break;
+      case 'content_flagged':
+        specificTags = ['content-moderation', 'safety', 'policy'];
+        break;
+      case 'prompt_injection_blocked':
+        specificTags = ['security', 'injection', 'threat'];
+        break;
+      default:
+        specificTags = ['security'];
+    }
+    
     return {
       blocked: true,
       eventType,
       userId,
       channelType,
       messageLength: redactedText?.length || 0,
+      tags: specificTags, // Include tags in output for visibility
       ...eventDetails,
     };
   },
   {
     name: 'compliance_check',
-    tags: (input) => {
-      // Base tags for all compliance checks
-      const baseTags = ['compliance', 'guardrail'];
-      
-      // Add specific tags based on violation type
-      switch (input.eventType) {
-        case 'pii_blocked':
-          return [...baseTags, 'pii', 'data-protection', 'privacy'];
-        case 'content_flagged':
-          return [...baseTags, 'content-moderation', 'safety', 'policy'];
-        case 'prompt_injection_blocked':
-          return [...baseTags, 'security', 'injection', 'threat'];
-        default:
-          return [...baseTags, 'security'];
-      }
-    },
+    tags: ['compliance', 'guardrail'], // Static base tags
     metadata: (input) => ({
       userId: input.userId,
       channelType: input.channelType,
