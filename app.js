@@ -385,8 +385,10 @@ const checkComplianceGuardrails = traceable(
       messageLength: input.redactedText?.length || 0,
     }),
     // processInputs ensures the redacted message text is shown in LangSmith, not the userId
-    // Return just the redacted text string as the input for clean UI display
-    processInputs: (input) => input.redactedText || 'No text provided',
+    // Return object with just the input field for clean UI display
+    processInputs: (input) => ({
+      input: input.redactedText || 'No text provided',
+    }),
   }
 );
 
