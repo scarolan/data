@@ -10,22 +10,11 @@ Show the official LangChain architecture diagram:
 - **EVALUATE**: Evals for continuous improvement
 - **ITERATE**: The feedback loop
 
-**Talk track**: *"LangChain isn't just an SDK—it's a complete platform for building, deploying, and operating production AI applications. Today I'll show you how all four pillars work together in a real Slack bot."*
+**Talk track**: *"LangChain isn't just an SDK—it's a complete platform for end-to-end lifecycle management of your production AI applications. Today I'll show you how these components all work together in with real AI application."*
 
 ---
 
-### **Slide 2: Before & After LangSmith** (1 minute)
-Side-by-side screenshot comparison:
-- **LEFT**: Plain chatbot response (no buttons, no observability)
-  - Caption: *"Your bot today"*
-- **RIGHT**: Same response with LangSmith (👍 👎 buttons visible)
-  - Caption: *"Your bot with LangSmith"*
-
-**Talk track**: *"Here's the difference. On the left: a chatbot that works but gives you zero visibility. You have no idea if users love it or hate it. On the right: the same bot with LangSmith—feedback buttons, full traces, and compliance logs."*
-
----
-
-### **Slide 3: What We'll Cover Today** (1 minute)
+### **Slide 2: What We'll Cover Today** (1 minute)
 Agenda slide with checkboxes:
 - ✅ Live AI agent in Slack (Star Trek's Data)
 - ✅ Conversation memory with Redis
@@ -40,12 +29,13 @@ Agenda slide with checkboxes:
 
 ## 📋 Demo Sections (17 minutes)
 
-### **Section 0: Setting the Stage – ComicCon & Data** (2 min)
+### **Section 0: Setting the Stage – ComicCon & Data** (4 min)
 **Goal**: Introduce the scenario and show off the repo/packages
 
 **Talk track**:
-- *"You are on the app team for ComicCon NYC, and you've been tasked to build an LLM chatbot based on the personality of Data, the android from Star Trek. Data will be the virtual AI assistant for attendees, answering questions, sharing schedules, and more. With just a few lines of LangChain code, Data is fully instrumented for enterprise features—memory, tracing, compliance, and feedback—making advanced AI easy to deploy and operate."*
-- *"Let's look at the code behind Data. In `app.js`, you’ll see how a few key packages—LangChain, LangSmith, Redis, and Slack Bolt—do the heavy lifting. These aren’t just wrappers; they save months of engineering time by providing memory, tracing, compliance, and feedback out of the box."*
+- *"We are on the app team for ComicCon NYC, and we've been tasked to build an LLM chatbot based on the personality of Data, the android from Star Trek, The Next Generation. Data will be the virtual AI assistant for attendees, answering questions, sharing schedules, and more. With just a few lines of LangChain code, Data is fully instrumented with memory, tracing, compliance, and feedback, making advanced AI easy to deploy and operate."*
+- *"Let's look at the code behind Data. Here in `app.js`, you’ll see some LangChain and LangSmith packages. They save months of engineering time by providing memory, tracing, compliance, and feedback out of the box."*
+- *"This code is open source and I'll share the link after the demo. Let's move on to the fun stuff."*
 
 **Actions**:
 1. Show the GitHub repo and open `app.js`.
@@ -53,11 +43,16 @@ Agenda slide with checkboxes:
 3. Briefly explain what each package does and why it matters for production AI.
 
 **Mini Demo**:
-1. Send: *"Hello Data, we're super excited to meet you and be here."*
-2. Send: *"What's on the schedule for today?"*
-3. Update Data's prompt in LangSmith (e.g., add new event info or change personality) and restart the bot.
-4. Ask the question again to show instant prompt iteration.
-5. Show the trace in LangSmith, pointing out how the prompt change is reflected.
+1. Send: *"Hi Data! I'm super excited, this is my first ComicCon. How do I get to the Javits Center?"*  
+2. Send: *"Can I bring my katana sword to ComicCon?"*  
+3. Send: *"What's on the schedule for Saturday?"*  
+4. Explain the scenario: *"Organizers asked us to add a party to Saturday's schedule — we'll update Data's prompt so he knows about it."*
+5. Open LangSmith and navigate to the prompt engineering section.  
+	- Talk track: "LangChain + LangSmith make prompt iteration fast: edit, test, and commit from the UI before pushing changes to production."
+6. Edit Data's prompt: add the line *"Saturday 8pm: Party with Warp 11 (Main Hall A)"* to the schedule section.
+7. Use LangSmith's test/inputs panel to run the prompt against the example input and verify the response contains the new party.
+8. Commit the prompt change in LangSmith and restart the `data` app.
+9. Return to Slack and ask: *"What's happening on Saturday?"* to confirm Data now includes: *"Saturday 8pm: Party with Warp 11 (Main Hall A)"* in his reply.
 
 **Key points**:
 - Rapid prompt iteration—change Data’s behavior instantly, no redeploy needed
@@ -103,6 +98,7 @@ Agenda slide with checkboxes:
 5. Select categories (e.g., "Not helpful") and add text: *"Data should be more opinionated"*
 6. Submit and show "Thanks for feedback!" confirmation
 7. Switch to LangSmith → show feedback attached to the run
+8. Briefly show off Datasets & Experiments and Annotation Queues
 
 **Talk track**:
 - *"Here's the classic Star Trek question—Kirk or Picard?"*
@@ -129,7 +125,7 @@ Agenda slide with checkboxes:
 **Goal**: Show compliance features that enterprises need
 
 #### **3a. PII Detection** (90 sec)
-**Action**: Send: *"My SSN is 123-45-6789, can you help me with benefits?"*
+**Action**: Send: *"My SSN is 123-45-6789, can you help me with my ComicCon badge?"*
 
 **Talk track**:
 - *"Watch what happens when someone accidentally shares PII"* (bot blocks it)
@@ -190,14 +186,12 @@ Agenda slide with checkboxes:
 3. Click into a thread → show multi-turn conversation flow
 4. Point out metadata: `thread_id`, `session_id`, `conversation_id`, `userId`, `channelType`
 5. Filter runs by tags: `security`, `pii_blocked`, `content_flagged`, `prompt_injection_blocked`
-6. Show how to export for compliance reports
 
 **Talk track**:
 - *"Threads let you see the full conversation history per user"*
 - *"Each user's messages are grouped together—perfect for debugging 'why did the bot say that?'"*
 - *"You can track: conversation length, total cost per user, feedback scores over time"*
 - *"Filter by security events—see all blocked attempts this week"*
-- *"Export to CSV for compliance reports in 30 seconds—show your auditor exactly what you're blocking"*
 
 **Key points**:
 - Dynamic metadata with `getCurrentRunTree()`
@@ -235,7 +229,7 @@ Agenda slide with checkboxes:
 >
 > **For Compliance/Legal:**
 > - ✅ Exportable audit logs for regulators
-> - ✅ Redacted PII in all traces
+> - ✅ Redacted PII in traces
 > - ✅ Proof you're enforcing data protection policies
 > - ✅ Every security event timestamped and traceable
 >
@@ -263,7 +257,7 @@ Agenda slide with checkboxes:
 
 | Section | Time | Purpose |
 |---------|------|---------|
-| Slides (3 total) | 4 min | Set context, before/after, agenda |
+| Slides (2 total) | 3 min | Set context, before/after, agenda |
 | Basic interaction + memory | 3 min | Show it works |
 | Feedback loop (RLHF) | 3 min | Show continuous improvement |
 | **Enterprise governance** | **5 min** | **MONEY SHOT** |
@@ -291,14 +285,11 @@ This demo shows that **LangChain solves the hard problems enterprises face when 
 
 ### Pre-Demo Checklist:
 - [ ] Bot running with `./start-with-tracing.sh`
-- [ ] LangSmith project open in browser: `pr-uncommon-pseudoscience-3`
+- [ ] LangSmith project open in browser: `enterprise-ai-governance-demo`
 - [ ] Slack workspace open with Data bot visible
 - [ ] Clear any old test messages for clean demo
 - [ ] Have test messages ready to paste (SSN, pipe bomb, jailbreak)
 - [ ] Check Redis is running: `redis-cli ping` → `PONG`
-- [ ] **Slide 2 screenshots prepared**: 
-  - LEFT: Screenshot from `main` branch 
-  - RIGHT: Screenshot from `demo-compliance-features` branch
 
 ### Fallback Plans:
 - If bot crashes: restart takes ~5 seconds
