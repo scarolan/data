@@ -219,23 +219,7 @@ function createPIIWarning(detectedTypes) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          processInputs: (inputs) => {
-            const args = (inputs && inputs.args) || [];
-            // Prefer a plausible user message: a non-empty string that doesn't look like a Slack user ID
-            const slackUserIdRe = /^U[A-Z0-9]{6,}$/i;
-            let candidate = null;
-            for (const a of args) {
-              if (typeof a === 'string' && a.trim().length > 0 && !slackUserIdRe.test(a.trim())) {
-                candidate = a.trim();
-                break;
-              }
-            }
-            // Fallbacks: first string arg, or JSON-stringified args if nothing else
-            if (!candidate) {
-              candidate = args.find(a => typeof a === 'string') || JSON.stringify(args);
-            }
-            return { input: candidate };
-          }
+          text: `Your message contains sensitive personally identifiable information (PII):\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses (in some contexts)\n• Phone numbers (in some contexts)\n\nPlease remove any PII and try again.`,
         },
       },
       {
