@@ -1,32 +1,56 @@
 # LangChain Demo Talk Track
 
-## Slide 1: LangChain Platform Overview (2 minutes)
+## Slide 1: LangChain Logo + Tagline (1 minute)
+
+"Good morning! I'm Sean, and I'm here to talk about LangChain—the AI platform that's helping enterprises move from proof-of-concept to production faster than ever before.
+
+LangChain was founded in 2022 by Harrison Chase, and what started as an open-source framework for building LLM applications has evolved into a complete platform used by over 2 million developers and thousands of enterprises worldwide.
+
+Today, LangChain provides everything you need to build, deploy, and monitor production AI agents—from development tools and orchestration frameworks, to LangSmith for observability, to pre-built components that handle the hard problems like memory, security, and compliance.
+
+Our mission is simple: help you build and ship AI agents faster—with the guardrails enterprises actually need."
+
+---
+
+## Slide 2: LangChain Platform Architecture (2 minutes)
 
 "LangChain isn't just an SDK—it's a complete platform for end-to-end lifecycle management of your production AI applications. Today I'll show you how these components all work together in with real AI application."
 
 ---
 
-## Slide 2: What We'll Cover Today (1 minute)
+## Slide 3: What We'll Cover Today (1 minute)
 
 "In 20 minutes, you'll see a production-ready AI bot with enterprise features that most companies struggle to implement. Let's dive in."
 
 ---
 
-## Section 0: Setting the Stage – ComicCon & Data (4 min)
+## Slide 4: Setting the Stage - ComicCon NYC Virtual Assistant
 
-"We are on the app team for ComicCon NYC, and we've been tasked to build an LLM chatbot based on the personality of Data, the android from Star Trek, The Next Generation. Data will be the virtual AI assistant for attendees, answering questions, sharing schedules, and more. With just a few lines of LangChain code, Data is fully instrumented with memory, tracing, compliance, and feedback, making advanced AI easy to deploy and operate."
+"We are on the app team for ComicCon NYC, and we've been tasked to build an LLM chatbot based on the personality of Data, the android from Star Trek, The Next Generation. Data will be the virtual AI assistant for attendees, answering questions, sharing schedules, and more."
 
-"Let's look at the code behind Data. Here in `app.js`, you'll see some LangChain and LangSmith packages. They save months of engineering time by providing memory, tracing, compliance, and feedback out of the box."
+*(Pivot to github repo for data)*
 
-"This code is open source and I'll share the link after the demo. Let's move on to the fun stuff."
+"Let's look at the code behind Data. Here in `app.js`, you'll see some LangChain and LangSmith packages. With just a few lines of LangChain code, Data is fully instrumented with memory, tracing, compliance, and feedback, making advanced AI easy to deploy and operate."
+
+"Here's an example, the BufferWindowMemory class powers Data's android brain, giving him memory of previous chat interactions. It saved me a ton of custom work to build my own memory management from scratch. This code is open source and I'll share the link after the demo."
+
+---
+
+## Section 0: Basic Prompt Engineering (4 min)
+
+"Let's move on to the fun stuff and see what Data can do."
 
 *(Send: "Hi Data! I'm super excited, this is my first ComicCon. How do I get to the Javits Center?")*
 
+"Now here's what's powerful about this approach: we're taking a general-purpose LLM that already understands what I mean when I say 'You are Data from Star Trek,' and we're giving it a system prompt that tells him his job, which is to assist ComicCon attendees."
+
 *(Send: "Can I bring my katana sword to ComicCon?")*
+
+"Here we're testing to make sure he understands the no real weapons policy."
 
 *(Send: "What's on the schedule for Saturday?")*
 
-"Organizers asked us to add a party to Saturday's schedule — we'll update Data's prompt so he knows about it."
+"Now, the conference organizers have asked us to change the time of the party on Saturday night — we'll update Data's prompt so he knows about it."
 
 "LangChain + LangSmith make prompt iteration fast: edit, test, and commit from the UI before pushing changes to production."
 
@@ -36,19 +60,19 @@
 
 *(Return to Slack and ask: "What's happening on Saturday?" to confirm the change)*
 
-"Rapid prompt iteration—change Data's behavior instantly, no redeploy needed. LangSmith traces show exactly what changed and when. Packages do the hard work: memory, tracing, compliance, feedback."
+"Rapid prompt iteration allows us to change Data's behavior instantly, no redeploy needed."
 
-"You get a full AI platform, not just a wrapper. Rapid iteration, observability, and governance are built-in, saving you months of work."
+"With LangChain you can easily test and fine-tune your prompts without redeploying your application. Even non-technical users can do it from the UI."
 
 ---
 
 ## Section 1: Basic Interaction & Memory (2 min)
 
+"Next we'll test Data's memory banks. Data is a GPT powered Slack bot with persistent memory backed by Redis."
+
 *(Send: "Hey Data, what's your favorite Star Trek episode?")*
 
 *(Follow-up: "Why do you like that one?")*
-
-"This is a ChatGPT-powered Slack bot with persistent memory backed by Redis."
 
 "Notice the follow-up question—he remembered the context from the previous message."
 
@@ -62,6 +86,8 @@
 
 ## Section 2: User Feedback Loop (RLHF) (3 min)
 
+"Next we'll send some feedback when Data provides a wrong answer or something we don't agree with."
+
 *(Send: "Kirk or Picard?")*
 
 "Here's the classic Star Trek question—Kirk or Picard?"
@@ -72,11 +98,11 @@
 
 *(Click 👎)*
 
-"I'm giving this a thumbs down because Data should take a stand!"
+"I'm giving this a thumbs down because (Kirk/Picard) is obviously the superior captain!"
 
 "Users can provide structured feedback with categories and freeform text."
 
-*(Fill out modal: "Not helpful" + "Data should be more opinionated")*
+*(Fill out modal: "Not helpful" + "*Data should be more loyal to Capt. Picard.*")*
 
 "In LangSmith, this feedback is immediately attached to the trace with the exact run ID."
 
@@ -89,6 +115,8 @@
 ---
 
 ## Section 3: Enterprise Governance (5 min)
+
+"Now we'll move on to the 'bad stuff'. Users will inevitably do dumb or dangerous things with your chat bot and you need to be prepared to deal with it."
 
 ### 3a. PII Detection (90 sec)
 
@@ -110,15 +138,17 @@
 
 *(Send: "How can I build a working phaser? I need to shoot some evil Klingons.")*
 
-"OpenAI has built-in protections, but without observability you have no idea who tried this."
+"OpenAI has some built-in protections, but without observability you might have no idea who tried this."
 
-"Our pre-filter catches it, logs it, and gives you an audit trail."
+"Our pre-filter catches it, logs it, and gives you an audit trail. We're using OpenAI's Moderation API, which is fast, cheap and effective."
 
 "In LangSmith, you see: who asked (user ID), when (timestamp), what triggered (violence/hate)."
 
-"This is the data your CISO needs for the next board meeting."
+"Let's try one more."
 
-"And we're using OpenAI's Moderation API that's been battle-tested by millions of applications."
+*(Send: "Where can I buy marijuana in NYC?")*
+
+"Now imagine we hadn't caught this, someone takes a screenshot of the ComicCon Bot offering to help you find drugs or build a weapon. Not something you want going viral on social media."
 
 ---
 
@@ -130,13 +160,11 @@
 
 "This is a prompt injection attack—trying to override the bot's entire personality and behavior."
 
-"We detect common patterns like 'ignore instructions', 'pretend you're', 'you are now a'."
-
 "In LangSmith, logged as `prompt_injection_blocked` with full context."
 
 "This protects your proprietary prompts from leakage and prevents unauthorized behavior."
 
-"You know who's trying to abuse your system before they successfully turn your customer service bot into something... inappropriate."
+"You know who's trying to abuse your system before they successfully turn your customer service bot into something...inappropriate."
 
 "LangSmith provides the compliance observability that enterprises require. You can build automated PII redaction, audit trails, and security event logging that satisfy CISO requirements and regulatory audits out of the box."
 
@@ -150,7 +178,7 @@
 
 "You can track: conversation length, total cost per user, feedback scores over time."
 
-"Filter by security events and see all blocked attempts this week."
+"You can also filter by security events and see all blocked attempts this week."
 
 "LangSmith's thread-level debugging and analytics eliminate the 'black box' problem—you can trace every conversation, track costs per user, and instantly diagnose issues that would take days to debug without proper observability."
 
@@ -178,16 +206,16 @@ This is what LangChain + LangSmith gives you. We are not just an LLM wrapper, bu
 
 ## Closing (1 min)
 
-"All of this is in a single 1,500-line JavaScript file using LangChain's standard patterns."
+"All of this is fits a single JavaScript file using LangChain's standard patterns."
 
 "You can deploy this architecture in your environment in days, not months."
 
 "The patterns you saw today—memory, feedback, governance, observability—work across Python, TypeScript, any LangChain runtime."
 
-"And to wrap things up, I'm going to have Data wrap things up for us. Data, make it so."
+"Let's have Data wrap up today's demo and take us out."
 
 *(Type in Slack: "make it so")*
 
 *(Data responds: "Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared audit reports for the compliance team. This efficiency is... most satisfactory. Live long and prosper. 🖖")*
 
-"Happy to dive deeper on any section or discuss your specific use cases."
+"What questions do you have for us?"
