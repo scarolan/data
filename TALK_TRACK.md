@@ -20,7 +20,7 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 ## Slide 3: What We'll Cover Today (1 minute)
 
-"In 20 minutes, you'll see a production-ready AI bot with enterprise features that most companies struggle to implement. Let's dive in."
+"In the next 17 minutes, you'll see how easy it is to build AI apps with enterprise features that most companies struggle to implement. Let's dive in."
 
 ---
 
@@ -30,9 +30,7 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 *(Pivot to github repo for data)*
 
-"Let's look at the code behind Data. Here in `app.js`, you'll see some LangChain and LangSmith packages. With just a few lines of LangChain code, Data is fully instrumented with memory, tracing, compliance, and feedback, making advanced AI easy to deploy and operate."
-
-"Here's an example, the BufferWindowMemory class powers Data's android brain, giving him memory of previous chat interactions. It saved me a ton of custom work to build my own memory management from scratch. This code is open source and I'll share the link after the demo."
+"Let's look at the code behind Data. Here's an example of how LangChain packages make developing apps easy. This BufferWindowMemory class powers Data's android brain, giving him memory of previous chat interactions. It saved me a ton of custom work because I didn't have to build my own memory management from scratch. Data's code is open source and I'll share the link after the demo."
 
 ---
 

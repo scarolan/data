@@ -362,7 +362,22 @@ const checkComplianceGuardrails = traceable(
   },
   {
     name: 'compliance_check',
-    tags: ['security', 'compliance', 'governance'],
+    tags: (input) => {
+      // Base tags for all compliance checks
+      const baseTags = ['compliance', 'guardrail'];
+      
+      // Add specific tags based on violation type
+      switch (input.eventType) {
+        case 'pii_blocked':
+          return [...baseTags, 'pii', 'data-protection', 'privacy'];
+        case 'content_flagged':
+          return [...baseTags, 'content-moderation', 'safety', 'policy'];
+        case 'prompt_injection_blocked':
+          return [...baseTags, 'security', 'injection', 'threat'];
+        default:
+          return [...baseTags, 'security'];
+      }
+    },
     metadata: (input) => ({
       userId: input.userId,
       channelType: input.channelType,
