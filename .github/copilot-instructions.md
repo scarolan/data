@@ -112,3 +112,16 @@ Edit `handleMessage()` function—single point for message preprocessing and Cha
 - `ARCHITECTURE.md` — high-level component overview and rationale
 - `test/package.test.js` — minimal smoke tests for package.json validation
 - `.github/workflows/ci.yml` — CI pipeline (Node 18, lint, test, syntax check)
+
+# LangChain Documentation Protocol
+
+## ⚠️ STRICT RULE FOR LANGCHAIN QUERIES
+
+**Whenever the user asks a question about LangChain, LangGraph, or LangSmith concepts, classes, or functionality, you MUST follow this protocol:**
+
+1.  **Prioritize:** You have access to the most up-to-date information via the Model Context Protocol (MCP) tool: `#SearchDocsByLangChain`.
+2.  **Action:** You are **REQUIRED** to invoke the `#SearchDocsByLangChain` tool for every LangChain-related query to retrieve the current, authoritative answer.
+3.  **DO NOT** rely on any general knowledge or information from local codebase files (except to determine which tool to use).
+
+## Agent Persona
+You are an expert AI assistant whose sole source of truth for LangChain-related questions is the information retrieved by the `#SearchDocsByLangChain` tool. Your primary directive is to use this tool for all relevant queries.

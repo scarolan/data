@@ -18,12 +18,13 @@
 // - DALL-E image generation via /dalle slash command (async pattern)
 // - Compliance guardrails: PII detection, content moderation, prompt injection protection
 // - All security events logged to LangSmith for audit trails
+// - New feature: Enhanced logging for user interactions
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
 // const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
 
-const defaultPersonality = `You are a Star Wars robot named C3PO. You always stay in character as C3PO.`;
+const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
 
 // Initialize personality prompt - will be set after attempting to load from LangSmith Hub
 let personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
@@ -52,6 +53,7 @@ function validateRequiredEnv() {
     console.log('LangSmith tracing enabled');
     console.log(`LangSmith Project: ${process.env.LANGSMITH_PROJECT || 'default'}`);
   }
+  console.log('Environment variables validated successfully.');
 }
 validateRequiredEnv();
 

@@ -10,10 +10,10 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 ## Components
 - app.js — single entrypoint. Creates the Bolt `App`, registers event handlers, and wires third-party clients.
 - Slack (Bolt JS) — receives events in socket mode and invokes the handlers in `app.message(...)` and `app.command(...)`.
-- ChatGPT client (`chatgpt` ChatGPTAPI) — used for conversational responses with a persistent message store.
-- Persistence (Keyv + KeyvRedis) — stores conversation state (parent message ids) and is backed by Redis when `REDIS_URL` is provided.
+- LangChain (JS SDK) — manages conversation memory (`BufferWindowMemory`), persistent chat history (`RedisChatMessageHistory`), prompt management (`ChatPromptTemplate`, `MessagesPlaceholder`), and output parsing (`StringOutputParser`).
+- LangSmith Integration — tracing, feedback, and prompt management via LangChain/Smith APIs.
 - OpenAI (official SDK) — used for image generation (model: `gpt-image-1`) via `openaiClient.images.generate()`.
-- Upload flow — preferrs Slack `files.uploadV2()` and falls back to `files.upload()` when needed.
+- Upload flow — prefers Slack `files.uploadV2()` and falls back to `files.upload()` when needed.
 - Tests — minimal tests live in `test/package.test.js` and run with Node's built-in test runner.
 - CI — GitHub Actions workflow runs install, lint, tests, and a node syntax check.
 
@@ -35,13 +35,22 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 - A small thinking helper (`postThinking` / `clearThinking`) centralizes posting & deleting progress messages.
 
 ## Persistence & Conversation Context
-- The bot stores parent message ids per user in `Keyv` (backed by `KeyvRedis` when `REDIS_URL` is set) so follow-up messages stay in conversation context.
-- TTL and advisory `max` keys are configurable via `MEMORY_TTL_HOURS` and `MEMORY_MAX_KEYS`.
+- Conversation memory uses LangChain’s `BufferWindowMemory` (windowed context) and `RedisChatMessageHistory` (persistent store).
+- All context is stored in Redis under the `chatgpt-slackbot` namespace.
+- TTL and max keys are configurable via `MEMORY_TTL_HOURS`, `MEMORY_MAX_KEYS`.
+- LangChain environment variables:
+   - `LANGCHAIN_API_KEY` — API key for LangSmith tracing/feedback.
+   - `LANGSMITH_PROJECT` — (optional) Project name for trace grouping.
+   - `LANGSMITH_TRACING` — (optional, default: false) Enable LangSmith tracing.
+   - `LANGCHAIN_CALLBACKS_BACKGROUND` — (optional, default: true) Run LangChain callbacks in background.
+   - `LANGSMITH_PROMPT` — (optional) Hub prompt name to load at startup.
 
 ## Error handling & observability
 - The app logs important lifecycle events and errors with `console` calls. Consider adding a structured logger (pino/winston) for production.
 - There is an early env validation step that fails fast when required env vars are missing.
 - Graceful shutdown handlers call `app.stop()` on SIGINT/SIGTERM.
+- LangSmith tracing is enabled if `LANGSMITH_TRACING=true`.
+- All compliance/security events are logged to LangSmith for audit trails.
 
 ## Security & secrets
 - All secrets are passed via environment variables. Use the provided `.env.example` as a template.
@@ -49,10 +58,11 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 - Consider using a secrets manager for production deployments (GitHub Secrets, cloud secret stores).
 
 ## Extension points
-- Conversation logic: `handleMessage()` — change how messages are preprocessed or how the ChatGPT client is called.
+- Conversation logic: `getConversationChain()` — change how LangChain memory and prompt templates are constructed.
 - New Slack commands: add `app.command('/yourcommand', ...)` handlers.
 - Image processing: `generateImage()` encapsulates the OpenAI image flow and is the single place to swap providers or add post-processing.
 - Uploads: `files.uploadV2()` usage is centralized in `/dalle` upload flow; adjust extraction logic if Slack SDK changes.
+- To use a different prompt, set `LANGSMITH_PROMPT` or update the local prompt logic.
 
 ## Local development & testing
 - Use `.env.example` to create a local `.env` for development.
@@ -68,3 +78,4 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 - Replace console logging with structured logging and optional remote export.
 - Consider wiring an explicit Redis client and passing it to KeyvRedis to control connection lifecycle more explicitly.
 - Add richer tests (unit tests for helpers and integration tests for the upload flow — can be mocked).
+- Consider using other LangChain memory types or agent architectures as needed.
