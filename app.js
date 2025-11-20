@@ -219,7 +219,23 @@ function createPIIWarning(detectedTypes) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `I detected the following sensitive information in your message:\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing PII. Please rephrase your request without including:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses\n• Phone numbers\n\nIf you need to discuss sensitive information, please contact your administrator.`,
+          processInputs: (inputs) => {
+            const args = (inputs && inputs.args) || [];
+            // Prefer a plausible user message: a non-empty string that doesn't look like a Slack user ID
+            const slackUserIdRe = /^U[A-Z0-9]{6,}$/i;
+            let candidate = null;
+            for (const a of args) {
+              if (typeof a === 'string' && a.trim().length > 0 && !slackUserIdRe.test(a.trim())) {
+                candidate = a.trim();
+                break;
+              }
+            }
+            // Fallbacks: first string arg, or JSON-stringified args if nothing else
+            if (!candidate) {
+              candidate = args.find(a => typeof a === 'string') || JSON.stringify(args);
+            }
+            return { input: candidate };
+          }
         },
       },
       {
@@ -368,6 +384,12 @@ const checkComplianceGuardrails = traceable(
       channelType: input.channelType,
       eventType: input.eventType || 'unknown',
       messageLength: input.redactedText?.length || 0,
+    }),
+    // processInputs ensures the redacted message text is shown in LangSmith, not the userId
+    processInputs: (input) => ({
+      input: input.redactedText || 'No text provided',
+      userId: input.userId,
+      eventType: input.eventType,
     }),
   }
 );
@@ -641,7 +663,23 @@ const processUserMessage = traceable(async function processUserMessage(userInput
   // processInputs transforms the logged inputs for LangSmith display
   // With 3 parameters, default format is { args: [param1, param2, param3] }
   // We extract just the user's message text for clean display
-  processInputs: (inputs) => ({ input: inputs.args[0] })
+  processInputs: (inputs) => {
+    const args = (inputs && inputs.args) || [];
+    // Prefer a plausible user message: a non-empty string that doesn't look like a Slack user ID
+    const slackUserIdRe = /^U[A-Z0-9]{6,}$/i;
+    let candidate = null;
+    for (const a of args) {
+      if (typeof a === 'string' && a.trim().length > 0 && !slackUserIdRe.test(a.trim())) {
+        candidate = a.trim();
+        break;
+      }
+    }
+    // Fallbacks: first string arg, or JSON-stringified args if nothing else
+    if (!candidate) {
+      candidate = args.find(a => typeof a === 'string') || JSON.stringify(args);
+    }
+    return { input: candidate };
+  }
 });
 
 // Helper: post a consistent "thinking" message with the configured context text
