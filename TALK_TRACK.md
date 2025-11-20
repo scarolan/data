@@ -188,6 +188,6 @@ This is what LangChain + LangSmith gives you. We are not just an LLM wrapper, bu
 
 *(Type in Slack: "make it so")*
 
-*(Data responds: "Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared compliance reports for three regulatory frameworks. This efficiency is... most satisfactory. Live long and prosper. 🖖")*
+*(Data responds: "Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared audit reports for the compliance team. This efficiency is... most satisfactory. Live long and prosper. 🖖")*
 
 "Happy to dive deeper on any section or discuss your specific use cases."

@@ -852,7 +852,23 @@ async function clearThinking(channel, ts) {
 
     // Demo closing statement trigger
     if (message.text && message.text.match(/make it so/i)) {
-      await say("Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared compliance reports for three regulatory frameworks. This efficiency is... most satisfactory. Live long and prosper. 🖖");
+      await say({
+        text: "Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared compliance reports for three regulatory frameworks. This efficiency is... most satisfactory. Live long and prosper. 🖖",
+        blocks: [
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: "Fascinating. In 0.347 seconds, I have processed your feedback, logged all security events, and prepared compliance reports. This efficiency is... most satisfactory. Live long and prosper. 🖖",
+            },
+          },
+          {
+            type: 'image',
+            image_url: 'https://storage.googleapis.com/carolan_public/sean_comic_con.jpg',
+            alt_text: 'ComicCon NYC - To Boldly Go Where No AI Has Gone Before',
+          },
+        ],
+      });
       return;
     }
 
