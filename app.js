@@ -233,6 +233,7 @@ const detectPII = traceable(async function detectPII(text) {
   }
 }, {
   name: 'google_dlp_detect_pii',
+  run_type: 'tool',
   tags: ['google-dlp', 'pii-detection', 'security'],
   metadata: {
     provider: 'Google Cloud DLP',
@@ -285,6 +286,7 @@ const redactPII = traceable(async function redactPII(text) {
   }
 }, {
   name: 'google_dlp_redact_pii',
+  run_type: 'tool',
   tags: ['google-dlp', 'pii-redaction', 'data-protection'],
   metadata: {
     provider: 'Google Cloud DLP',
@@ -430,6 +432,7 @@ const checkContentModeration = traceable(async function checkContentModeration(t
   }
 }, {
   name: 'openai_content_moderation',
+  run_type: 'tool',
   tags: ['openai', 'content-moderation', 'safety'],
   metadata: {
     provider: 'OpenAI',
