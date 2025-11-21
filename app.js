@@ -175,8 +175,8 @@ try {
   throw error;
 }
 
-// Detect PII using Google Cloud DLP API
-const detectPII = traceable(async function detectPII(text) {
+// Detect sensitive data using Google Cloud DLP API
+const detectSensitiveData = traceable(async function detectSensitiveData(text) {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
@@ -232,9 +232,9 @@ const detectPII = traceable(async function detectPII(text) {
     return ['PII Detection Service Unavailable'];
   }
 }, {
-  name: 'google_dlp_detect_pii',
+  name: 'google_dlp_detect_sensitive_data',
   run_type: 'tool',
-  tags: ['google-dlp', 'pii-detection', 'security'],
+  tags: ['google-dlp', 'sensitive-data-detection', 'security'],
   metadata: {
     provider: 'Google Cloud DLP',
     location: 'us',
@@ -243,14 +243,14 @@ const detectPII = traceable(async function detectPII(text) {
   // Hide input text in LangSmith traces to prevent logging potentially sensitive data
   processInputs: (inputs) => {
     return {
-      text: '[Input hidden for security - scanning for PII]',
+      text: '[Input hidden for security - scanning for sensitive data]',
       inputLength: inputs[0]?.length || 0
     };
   },
 });
 
-// Redact PII from text using Google Cloud DLP API
-const redactPII = traceable(async function redactPII(text) {
+// Redact sensitive data from text using Google Cloud DLP API
+const redactSensitiveData = traceable(async function redactSensitiveData(text) {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
@@ -292,9 +292,9 @@ const redactPII = traceable(async function redactPII(text) {
     return '[REDACTED - PII DETECTED]';
   }
 }, {
-  name: 'google_dlp_redact_pii',
+  name: 'google_dlp_redact_sensitive_data',
   run_type: 'tool',
-  tags: ['google-dlp', 'pii-redaction', 'data-protection'],
+  tags: ['google-dlp', 'sensitive-data-redaction', 'data-protection'],
   metadata: {
     provider: 'Google Cloud DLP',
     location: 'us',
@@ -329,20 +329,20 @@ function detectPromptInjection(text) {
 function createPIIWarning(detectedTypes) {
   const typesList = detectedTypes.join(', ');
   return {
-    text: '⚠️ PII Detected - Message Blocked',
+    text: '⚠️ Sensitive Data Detected - Message Blocked',
     blocks: [
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: ':warning: *Security Alert: Personally Identifiable Information Detected*',
+          text: ':warning: *Sensitive Data Detected*',
         },
       },
       {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `Your message contains sensitive personally identifiable information (PII):\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses (in some contexts)\n• Phone numbers (in some contexts)\n• Driver's licenses, passports, and bank routing numbers\n\nPlease remove any PII and try again.`,
+          text: `Your message contains sensitive or personally identifiable information (PII):\n\n*${typesList}*\n\nFor security and compliance reasons, please remove any sensitive data and try again.`,
         },
       },
       {
@@ -350,7 +350,7 @@ function createPIIWarning(detectedTypes) {
         elements: [
           {
             type: 'mrkdwn',
-            text: '🔒 _This security check is powered by Google Cloud DLP with 150+ detection patterns, helping protect against accidental data exposure and ensuring GDPR/HIPAA compliance._',
+            text: '🔒 _This security check is powered by Google Cloud DLP with 150+ detection patterns._',
           },
         ],
       },
@@ -458,8 +458,8 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   // Get the current run tree to add tags dynamically
   const runTree = getCurrentRunTree();
   
-  // 1. PII Detection
-  const piiDetected = await detectPII(messageText);
+  // 1. Sensitive Data Detection
+  const piiDetected = await detectSensitiveData(messageText);
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
     
@@ -470,7 +470,7 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
     }
     
     // Log redacted version to LangSmith (nested inside this trace)
-    const redactedText = await redactPII(messageText);
+    const redactedText = await redactSensitiveData(messageText);
     await checkComplianceGuardrails({
       redactedText: redactedText,
       userId: userId,
