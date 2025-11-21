@@ -200,7 +200,9 @@ async function detectPII(text) {
       },
     };
 
+    console.log('Calling DLP inspectContent API...');
     const [response] = await dlp.inspectContent(request);
+    console.log('DLP inspectContent successful');
     
     const detected = [];
     const findings = response.result.findings || [];
@@ -219,7 +221,11 @@ async function detectPII(text) {
     return [...new Set(detected)];
     
   } catch (error) {
-    console.error('Google DLP API error:', error);
+    console.error('Google DLP API error details:');
+    console.error('Error message:', error.message);
+    console.error('Error code:', error.code);
+    console.error('Error details:', JSON.stringify(error.details, null, 2));
+    console.error('Full error:', error);
     // Fail closed - if DLP is down, block the message to be safe
     return ['PII Detection Service Unavailable'];
   }
