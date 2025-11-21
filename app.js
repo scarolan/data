@@ -516,7 +516,7 @@ const redisClient = new Redis(redisUrl);
 
 // Create LangChain ChatOpenAI instance
 const chatModel = new ChatOpenAI({
-  modelName: 'gpt-4o',
+  modelName: 'gpt-4o-mini',
   openAIApiKey: process.env.OPENAI_API_KEY,
   temperature: 0.7,
 });
