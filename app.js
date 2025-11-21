@@ -647,7 +647,7 @@ const redisClient = new Redis(redisUrl);
 const chatModel = new ChatOpenAI({
   modelName: 'gpt-5-mini',
   openAIApiKey: process.env.OPENAI_API_KEY,
-  temperature: 0.7,
+  //temperature: 0.7,
 });
 
 // Function to get or create conversation chain with memory for each user
