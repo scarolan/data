@@ -481,13 +481,13 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       redactedText: redactedText,
       userId: userId,
       channelType: channelType,
-      eventType: 'pii_blocked',
+      eventType: 'sensitive_data_blocked',
       eventDetails: { detectedTypes: piiDetected }
     });
     
     return {
       warning: createPIIWarning(piiDetected),
-      eventType: 'pii_blocked',
+      eventType: 'sensitive_data_blocked',
       detectedTypes: piiDetected,
     };
   }
@@ -578,7 +578,7 @@ const checkComplianceGuardrails = traceable(
     if (runTree) {
       let specificTags = [];
       switch (eventType) {
-        case 'pii_blocked':
+        case 'sensitive_data_blocked':
           specificTags = ['pii', 'data-protection', 'privacy'];
           break;
         case 'content_flagged':
