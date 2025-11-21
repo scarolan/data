@@ -191,6 +191,12 @@ async function detectPII(text) {
           { name: 'PASSPORT' },
           { name: 'US_DRIVERS_LICENSE_NUMBER' },
           { name: 'US_BANK_ROUTING_MICR' },
+          { name: 'AWS_ACCESS_KEY_ID' },
+          { name: 'GCP_API_KEY' },
+          { name: 'ENCRYPTION_KEY' },
+          { name: 'IBAN_CODE' },
+          { name: 'IMEI_HARDWARE_ID' },
+          { name: 'MAC_ADDRESS' },
         ],
         minLikelihood: 'POSSIBLE', // VERY_UNLIKELY, UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELY
         includeQuote: false,
@@ -216,6 +222,12 @@ async function detectPII(text) {
       if (infoType === 'PASSPORT') detected.push('Passport');
       if (infoType === 'US_DRIVERS_LICENSE_NUMBER') detected.push('Driver License');
       if (infoType === 'US_BANK_ROUTING_MICR') detected.push('Bank Routing Number');
+      if (infoType === 'AWS_ACCESS_KEY_ID') detected.push('AWS Access Key');
+      if (infoType === 'GCP_API_KEY') detected.push('Google Cloud API Key');
+      if (infoType === 'ENCRYPTION_KEY') detected.push('Encryption Key');
+      if (infoType === 'IBAN_CODE') detected.push('IBAN');
+      if (infoType === 'IMEI_HARDWARE_ID') detected.push('IMEI Number');
+      if (infoType === 'MAC_ADDRESS') detected.push('MAC Address');
     });
 
     return [...new Set(detected)];
@@ -257,6 +269,12 @@ async function redactPII(text) {
           { name: 'PHONE_NUMBER' },
           { name: 'PASSPORT' },
           { name: 'US_DRIVERS_LICENSE_NUMBER' },
+          { name: 'AWS_ACCESS_KEY_ID' },
+          { name: 'GCP_API_KEY' },
+          { name: 'ENCRYPTION_KEY' },
+          { name: 'IBAN_CODE' },
+          { name: 'IMEI_HARDWARE_ID' },
+          { name: 'MAC_ADDRESS' },
         ],
       },
       item: {
