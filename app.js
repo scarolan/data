@@ -554,8 +554,12 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   run_type: 'chain',
   tags: ['compliance', 'guardrails', 'security-scan'],
   // Mask the message text in LangSmith traces to prevent logging plaintext PII
-  processInputs: () => {
-    return '[REDACTED - Compliance & Security Scan]';
+  processInputs: (inputs) => {
+    return {
+      messageText: '[REDACTED - Compliance & Security Scan]',
+      userId: inputs.userId,
+      channelType: inputs.channelType
+    };
   },
 });
 
