@@ -885,8 +885,8 @@ async function clearThinking(channel, ts) {
           },
           {
             type: 'image',
-            image_url: 'https://storage.googleapis.com/carolan_public/sean_comic_con.jpg',
-            alt_text: 'ComicCon NYC - To Boldly Go Where No AI Has Gone Before',
+            image_url: 'https://storage.googleapis.com/carolan_public/langchainlogo.jpg',
+            alt_text: 'LangChain - a platform for developing applications powered by language models',
           },
         ],
       });
