@@ -75,6 +75,7 @@ import Redis from 'ioredis';
 import Keyv from 'keyv';
 import KeyvRedis from '@keyv/redis';
 import fetch from 'node-fetch';
+import { DlpServiceClient } from '@google-cloud/dlp';
 //Uncomment this and the logLevel below to enable DEBUG
 //import { LogLevel } from '@slack/bolt';
 
@@ -154,26 +155,106 @@ const langsmithClient = new Client({
 ///////////////////////////////////////////////////////////////
 // COMPLIANCE & GOVERNANCE FEATURES
 // Demonstrates enterprise-grade guardrails for AI deployment
-// In production, replace simple regex patterns with enterprise DLP tools
-// like Nightfall AI, AWS Macie, Microsoft Purview, etc.
+// Uses Google Cloud Data Loss Prevention (DLP) API for PII detection
 ///////////////////////////////////////////////////////////////
 
-// PII Detection Patterns
-const PII_PATTERNS = {
-  ssn: /\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b/g,
-  credit_card: /\b(?:\d{4}[-\s]?){3}\d{4}\b/g,
-  email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,
-  phone: /\b(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})\b/g,
-};
+// Initialize Google Cloud DLP client
+const dlp = new DlpServiceClient({
+  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+});
 
-// Redact PII from text for safe logging
-function redactPII(text) {
-  let redacted = text;
-  redacted = redacted.replace(PII_PATTERNS.ssn, '***-**-****');
-  redacted = redacted.replace(PII_PATTERNS.credit_card, '**** **** **** ****');
-  redacted = redacted.replace(PII_PATTERNS.email, '****@****.***');
-  redacted = redacted.replace(PII_PATTERNS.phone, '***-***-****');
-  return redacted;
+// Detect PII using Google Cloud DLP API
+async function detectPII(text) {
+  try {
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+    
+    const request = {
+      parent: `projects/${projectId}/locations/global`,
+      inspectConfig: {
+        infoTypes: [
+          { name: 'US_SOCIAL_SECURITY_NUMBER' },
+          { name: 'CREDIT_CARD_NUMBER' },
+          { name: 'EMAIL_ADDRESS' },
+          { name: 'PHONE_NUMBER' },
+          { name: 'PASSPORT' },
+          { name: 'US_DRIVERS_LICENSE_NUMBER' },
+          { name: 'US_BANK_ROUTING_MICR' },
+        ],
+        minLikelihood: 'POSSIBLE', // VERY_UNLIKELY, UNLIKELY, POSSIBLE, LIKELY, VERY_LIKELY
+        includeQuote: false,
+      },
+      item: {
+        value: text,
+      },
+    };
+
+    const [response] = await dlp.inspectContent(request);
+    
+    const detected = [];
+    const findings = response.result.findings || [];
+    
+    findings.forEach(finding => {
+      const infoType = finding.infoType.name;
+      if (infoType === 'US_SOCIAL_SECURITY_NUMBER') detected.push('SSN');
+      if (infoType === 'CREDIT_CARD_NUMBER') detected.push('Credit Card');
+      if (infoType === 'EMAIL_ADDRESS') detected.push('Email');
+      if (infoType === 'PHONE_NUMBER') detected.push('Phone Number');
+      if (infoType === 'PASSPORT') detected.push('Passport');
+      if (infoType === 'US_DRIVERS_LICENSE_NUMBER') detected.push('Driver License');
+      if (infoType === 'US_BANK_ROUTING_MICR') detected.push('Bank Routing Number');
+    });
+
+    return [...new Set(detected)];
+    
+  } catch (error) {
+    console.error('Google DLP API error:', error);
+    // Fail closed - if DLP is down, block the message to be safe
+    return ['PII Detection Service Unavailable'];
+  }
+}
+
+// Redact PII from text using Google Cloud DLP API
+async function redactPII(text) {
+  try {
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+    
+    const request = {
+      parent: `projects/${projectId}/locations/global`,
+      deidentifyConfig: {
+        infoTypeTransformations: {
+          transformations: [
+            {
+              primitiveTransformation: {
+                replaceWithInfoTypeConfig: {},
+              },
+            },
+          ],
+        },
+      },
+      inspectConfig: {
+        infoTypes: [
+          { name: 'US_SOCIAL_SECURITY_NUMBER' },
+          { name: 'CREDIT_CARD_NUMBER' },
+          { name: 'EMAIL_ADDRESS' },
+          { name: 'PHONE_NUMBER' },
+          { name: 'PASSPORT' },
+          { name: 'US_DRIVERS_LICENSE_NUMBER' },
+        ],
+      },
+      item: {
+        value: text,
+      },
+    };
+
+    const [response] = await dlp.deidentifyContent(request);
+    return response.item.value || text;
+    
+  } catch (error) {
+    console.error('Google DLP redaction error:', error);
+    // Return [REDACTED] as fallback
+    return '[REDACTED - PII DETECTED]';
+  }
 }
 
 // Prompt Injection Detection Patterns
@@ -189,15 +270,6 @@ const INJECTION_PATTERNS = [
   /you\s+are\s+now\s+(a|an)\s+/i,
   /roleplay\s+as\s+(?!data|spock|enterprise)/i,
 ];
-
-function detectPII(text) {
-  const detected = [];
-  if (PII_PATTERNS.ssn.test(text)) detected.push('SSN');
-  if (PII_PATTERNS.credit_card.test(text)) detected.push('Credit Card');
-  if (PII_PATTERNS.email.test(text)) detected.push('Email');
-  if (PII_PATTERNS.phone.test(text)) detected.push('Phone Number');
-  return detected;
-}
 
 function detectPromptInjection(text) {
   return INJECTION_PATTERNS.some(pattern => pattern.test(text));
@@ -305,7 +377,7 @@ function createInjectionWarning() {
 // Internal function that does the actual detection (not traced)
 async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
   // 1. PII Detection
-  const piiDetected = detectPII(messageText);
+  const piiDetected = await detectPII(messageText);
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
     return {
@@ -915,7 +987,7 @@ async function clearThinking(channel, ts) {
       if (guardrailResult) {
         // Log redacted version to LangSmith
         await checkComplianceGuardrails({
-          redactedText: redactPII(message.text),
+          redactedText: await redactPII(message.text),
           userId: message.user,
           channelType: message.channel_type,
           eventType: guardrailResult.eventType,
@@ -985,7 +1057,7 @@ async function clearThinking(channel, ts) {
       if (guardrailResult) {
         // Log redacted version to LangSmith
         await checkComplianceGuardrails({
-          redactedText: redactPII(message.text),
+          redactedText: await redactPII(message.text),
           userId: message.user,
           channelType: message.channel_type,
           eventType: guardrailResult.eventType,
@@ -1138,7 +1210,7 @@ async function clearThinking(channel, ts) {
     if (guardrailResult) {
       // Log redacted version to LangSmith
       await checkComplianceGuardrails({
-        redactedText: redactPII(message.text),
+        redactedText: await redactPII(message.text),
         userId: message.user,
         channelType: message.channel_type,
         eventType: guardrailResult.eventType,

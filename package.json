@@ -20,6 +20,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@google-cloud/dlp": "^6.5.0",
     "@keyv/redis": "^5.1.1",
     "@langchain/classic": "^1.0.3",
     "@langchain/community": "^1.0.3",
