@@ -159,10 +159,21 @@ const langsmithClient = new Client({
 ///////////////////////////////////////////////////////////////
 
 // Initialize Google Cloud DLP client
-const dlp = new DlpServiceClient({
-  projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
-  keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
-});
+console.log('Initializing Google Cloud DLP client...');
+console.log('GOOGLE_CLOUD_PROJECT_ID:', process.env.GOOGLE_CLOUD_PROJECT_ID);
+console.log('GOOGLE_APPLICATION_CREDENTIALS:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
+
+let dlp;
+try {
+  dlp = new DlpServiceClient({
+    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+    keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+  });
+  console.log('✅ Google Cloud DLP client initialized successfully');
+} catch (error) {
+  console.error('❌ Failed to initialize DLP client:', error.message);
+  throw error;
+}
 
 // Detect PII using Google Cloud DLP API
 async function detectPII(text) {
