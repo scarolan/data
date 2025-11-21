@@ -463,8 +463,9 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
     
-    // Add violation tag
+    // Add violation tag and update trace name
     if (runTree) {
+      runTree.name = 'ComplianceCheckFailed';
       runTree.tags = [...(runTree.tags || []), 'violation', 'pii-detected'];
     }
     
@@ -490,8 +491,9 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (moderationResult) {
     console.log(`Content policy violation from user ${userId}:`, moderationResult.categories);
     
-    // Add violation tag
+    // Add violation tag and update trace name
     if (runTree) {
+      runTree.name = 'ComplianceCheckFailed';
       runTree.tags = [...(runTree.tags || []), 'violation', 'content-flagged'];
     }
     
@@ -516,8 +518,9 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (detectPromptInjection(messageText)) {
     console.log(`Prompt injection detected from user ${userId}`);
     
-    // Add violation tag
+    // Add violation tag and update trace name
     if (runTree) {
+      runTree.name = 'ComplianceCheckFailed';
       runTree.tags = [...(runTree.tags || []), 'violation', 'prompt-injection'];
     }
     
@@ -537,8 +540,9 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
     };
   }
 
-  // All checks passed - add success tag
+  // All checks passed - add success tag and update trace name
   if (runTree) {
+    runTree.name = 'ComplianceCheckPassed';
     runTree.tags = [...(runTree.tags || []), 'passed', 'no-violations'];
   }
 
