@@ -767,9 +767,6 @@ const processUserMessage = traceable(async function processUserMessage(userInput
       };
     }
     
-    // Run compliance guardrails (traced for observability)
-    await _checkComplianceGuardrailsInternal(userInput, userId, channelType);
-    
     // Check if input is null or undefined
     if (!userInput) {
       console.log('Received null or undefined input');
