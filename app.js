@@ -675,7 +675,7 @@ const processUserMessage = traceable(async function processUserMessage(userInput
   try {
     // Set thread metadata on the current run tree for LangSmith threads grouping
     const runTree = getCurrentRunTree();
-    if (runTree) {
+    if (runTree && runTree.extra) {
       runTree.extra.metadata = {
         ...runTree.extra.metadata,
         thread_id: userId,
