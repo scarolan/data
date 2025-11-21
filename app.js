@@ -293,7 +293,7 @@ const redactSensitiveData = traceable(async function redactSensitiveData(text) {
   } catch (error) {
     console.error('Google DLP redaction error:', error);
     // Return [REDACTED] as fallback
-    return '[REDACTED - PII DETECTED]';
+    return '[REDACTED - Security & Compliance Scan]';
   }
 }, {
   name: 'google_dlp_redact_sensitive_data',
@@ -483,7 +483,6 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       channelType: channelType,
       eventType: 'sensitive_data_blocked',
       eventDetails: { detectedTypes: piiDetected },
-      isPII: true  // Flag to indicate this needs redaction
     });
     
     return {
@@ -511,7 +510,6 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       channelType: channelType,
       eventType: 'content_flagged',
       eventDetails: { categories: moderationResult.categories },
-      isPII: false  // Flag to indicate no redaction needed
     });
     
     return {
@@ -539,7 +537,6 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       channelType: channelType,
       eventType: 'prompt_injection_blocked',
       eventDetails: { messageLength: messageText.length },
-      isPII: false  // Flag to indicate no redaction needed
     });
     
     return {
@@ -560,13 +557,10 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   name: 'ComplianceCheck',
   run_type: 'chain',
   tags: ['compliance', 'guardrails', 'security-scan'],
-  // Conditionally mask message text only for PII checks
   processInputs: (inputs) => {
-    // Only redact if this is a PII check
-    const shouldRedact = inputs.isPII === true;
     
     return {
-      messageText: shouldRedact ? '[REDACTED - Sensitive Data Scan]' : inputs.messageText,
+      messageText: '[REDACTED - Security and Compliance Scan]',
       userId: inputs.userId,
       channelType: inputs.channelType
     };
