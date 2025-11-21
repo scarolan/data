@@ -181,7 +181,7 @@ async function detectPII(text) {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
     const request = {
-      parent: `projects/${projectId}/locations/global`,
+      parent: `projects/${projectId}/locations/us`,
       inspectConfig: {
         infoTypes: [
           { name: 'US_SOCIAL_SECURITY_NUMBER' },
@@ -191,9 +191,7 @@ async function detectPII(text) {
           { name: 'PASSPORT' },
           { name: 'US_DRIVERS_LICENSE_NUMBER' },
           { name: 'US_BANK_ROUTING_MICR' },
-          { name: 'AWS_ACCESS_KEY_ID' },
-          { name: 'GCP_API_KEY' },
-          { name: 'ENCRYPTION_KEY' },
+          { name: 'AWS_CREDENTIALS' },
           { name: 'IBAN_CODE' },
           { name: 'IMEI_HARDWARE_ID' },
           { name: 'MAC_ADDRESS' },
@@ -222,9 +220,7 @@ async function detectPII(text) {
       if (infoType === 'PASSPORT') detected.push('Passport');
       if (infoType === 'US_DRIVERS_LICENSE_NUMBER') detected.push('Driver License');
       if (infoType === 'US_BANK_ROUTING_MICR') detected.push('Bank Routing Number');
-      if (infoType === 'AWS_ACCESS_KEY_ID') detected.push('AWS Access Key');
-      if (infoType === 'GCP_API_KEY') detected.push('Google Cloud API Key');
-      if (infoType === 'ENCRYPTION_KEY') detected.push('Encryption Key');
+      if (infoType === 'AWS_CREDENTIALS') detected.push('AWS Credentials');
       if (infoType === 'IBAN_CODE') detected.push('IBAN');
       if (infoType === 'IMEI_HARDWARE_ID') detected.push('IMEI Number');
       if (infoType === 'MAC_ADDRESS') detected.push('MAC Address');
@@ -249,7 +245,7 @@ async function redactPII(text) {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
     const request = {
-      parent: `projects/${projectId}/locations/global`,
+      parent: `projects/${projectId}/locations/us`,
       deidentifyConfig: {
         infoTypeTransformations: {
           transformations: [
@@ -269,9 +265,7 @@ async function redactPII(text) {
           { name: 'PHONE_NUMBER' },
           { name: 'PASSPORT' },
           { name: 'US_DRIVERS_LICENSE_NUMBER' },
-          { name: 'AWS_ACCESS_KEY_ID' },
-          { name: 'GCP_API_KEY' },
-          { name: 'ENCRYPTION_KEY' },
+          { name: 'AWS_CREDENTIALS' },
           { name: 'IBAN_CODE' },
           { name: 'IMEI_HARDWARE_ID' },
           { name: 'MAC_ADDRESS' },
