@@ -48,6 +48,10 @@ function validateRequiredEnv() {
     process.env.LANGCHAIN_CALLBACKS_BACKGROUND = 'true';
   }
   
+  // TEMPORARY: Disable LangSmith to test 403 issue
+  console.log('⚠️  TEMPORARILY DISABLING LANGSMITH TRACING TO DEBUG 403');
+  process.env.LANGSMITH_TRACING = 'false';
+  
   // Log LangSmith configuration
   if (process.env.LANGSMITH_TRACING === 'true') {
     console.log('LangSmith tracing enabled');
