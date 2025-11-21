@@ -463,14 +463,17 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
     
-    // Add violation tag and update trace name
+    // Redact the text first
+    const redactedText = await redactSensitiveData(messageText);
+    
+    // Update trace input to show redacted text instead of masked placeholder
     if (runTree) {
       runTree.name = 'ComplianceCheckFailed';
       runTree.tags = [...(runTree.tags || []), 'violation', 'pii-detected'];
+      runTree.inputs = { messageText: redactedText, userId, channelType };
     }
     
     // Log redacted version to LangSmith (nested inside this trace)
-    const redactedText = await redactSensitiveData(messageText);
     await checkComplianceGuardrails({
       redactedText: redactedText,
       userId: userId,
