@@ -48,10 +48,6 @@ function validateRequiredEnv() {
     process.env.LANGCHAIN_CALLBACKS_BACKGROUND = 'true';
   }
   
-  // TEMPORARY: Disable LangSmith to test 403 issue
-  console.log('⚠️  TEMPORARILY DISABLING LANGSMITH TRACING TO DEBUG 403');
-  process.env.LANGSMITH_TRACING = 'false';
-  
   // Log LangSmith configuration
   if (process.env.LANGSMITH_TRACING === 'true') {
     console.log('LangSmith tracing enabled');
@@ -1007,14 +1003,13 @@ async function clearThinking(channel, ts) {
       const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
       if (guardrailResult) {
         // Log redacted version to LangSmith
-        // TEMPORARILY DISABLED - testing 403 issue
-        // await checkComplianceGuardrails({
-        //   redactedText: await redactPII(message.text),
-        //   userId: message.user,
-        //   channelType: message.channel_type,
-        //   eventType: guardrailResult.eventType,
-        //   eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-        // });
+        await checkComplianceGuardrails({
+          redactedText: await redactPII(message.text),
+          userId: message.user,
+          channelType: message.channel_type,
+          eventType: guardrailResult.eventType,
+          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+        });
         
         await say(guardrailResult.warning);
         return;
@@ -1078,14 +1073,13 @@ async function clearThinking(channel, ts) {
       const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
       if (guardrailResult) {
         // Log redacted version to LangSmith
-        // TEMPORARILY DISABLED - testing 403 issue
-        // await checkComplianceGuardrails({
-        //   redactedText: await redactPII(message.text),
-        //   userId: message.user,
-        //   channelType: message.channel_type,
-        //   eventType: guardrailResult.eventType,
-        //   eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-        // });
+        await checkComplianceGuardrails({
+          redactedText: await redactPII(message.text),
+          userId: message.user,
+          channelType: message.channel_type,
+          eventType: guardrailResult.eventType,
+          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+        });
         
         await say(guardrailResult.warning);
         return;
@@ -1232,14 +1226,13 @@ async function clearThinking(channel, ts) {
     const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
     if (guardrailResult) {
       // Log redacted version to LangSmith
-      // TEMPORARILY DISABLED - testing 403 issue
-      // await checkComplianceGuardrails({
-      //   redactedText: await redactPII(message.text),
-      //   userId: message.user,
-      //   channelType: message.channel_type,
-      //   eventType: guardrailResult.eventType,
-      //   eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-      // });
+      await checkComplianceGuardrails({
+        redactedText: await redactPII(message.text),
+        userId: message.user,
+        channelType: message.channel_type,
+        eventType: guardrailResult.eventType,
+        eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
+      });
       
       await say(guardrailResult.warning);
       return;
