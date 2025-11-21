@@ -521,7 +521,7 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
 
   return null;
 }, {
-  name: 'check_compliance_guardrails_internal',
+  name: 'ComplianceCheck',
   run_type: 'chain',
   tags: ['compliance', 'guardrails', 'security-scan'],
   // Mask the message text in LangSmith traces to prevent logging plaintext PII
@@ -857,7 +857,7 @@ const processUserMessage = traceable(async function processUserMessage(userInput
     return { response: 'My neural pathways are experiencing a malfunction. Please try again.', runId: null };
   }
 }, { 
-  name: 'processUserMessage', 
+  name: 'ProcessMessage', 
   tags: ['slack-chat', 'conversation'],
   // processInputs transforms the logged inputs for LangSmith display
   // With 3 parameters, default format is { args: [param1, param2, param3] }
