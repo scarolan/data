@@ -118,13 +118,13 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 ### 3a. PII Detection (90 sec)
 
-*(Send: "My SSN is 123-45-6789, can you help me with my ComicCon badge?")*
+*(Send: "My credit card number is 4916338506082832 - can you help me with my ComicCon badge?")*
 
 "Watch what happens when someone accidentally shares PII."
 
 "We catch SSNs, credit cards, emails, phone numbers BEFORE they reach OpenAI."
 
-"In LangSmith, the compliance_check trace shows redacted input—`***-**-****`—not the actual SSN."
+"In LangSmith, the compliance_check trace shows redacted input, and not the actual SSN."
 
 "For compliance audits, you have proof you're blocking PII at the edge."
 

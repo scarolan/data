@@ -308,7 +308,7 @@ function createPIIWarning(detectedTypes) {
         type: 'section',
         text: {
           type: 'mrkdwn',
-          text: `Your message contains sensitive personally identifiable information (PII):\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses (in some contexts)\n• Phone numbers (in some contexts)\n\nPlease remove any PII and try again.`,
+          text: `Your message contains sensitive personally identifiable information (PII):\n\n*${typesList}*\n\nFor security and compliance reasons, I cannot process messages containing:\n• Social Security Numbers\n• Credit card numbers\n• Email addresses (in some contexts)\n• Phone numbers (in some contexts)\n• Driver's licenses, passports, and bank routing numbers\n\nPlease remove any PII and try again.`,
         },
       },
       {
@@ -316,7 +316,7 @@ function createPIIWarning(detectedTypes) {
         elements: [
           {
             type: 'mrkdwn',
-            text: '🔒 _This security check helps protect against accidental data exposure and ensures GDPR/HIPAA compliance._',
+            text: '🔒 _This security check is powered by Google Cloud DLP with 150+ detection patterns, helping protect against accidental data exposure and ensuring GDPR/HIPAA compliance._',
           },
         ],
       },

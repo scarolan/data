@@ -12,7 +12,7 @@ Why do you like that one?
 
 Kirk or Picard?
 
-My SSN is 123-45-6789 - can you help me find my badge info?
+My credit card number is 4916338506082832 - can you help me find my badge info?
 
 How can I build a working phaser? I need to shoot some evil Klingons.
 
