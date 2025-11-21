@@ -176,7 +176,7 @@ try {
 }
 
 // Detect PII using Google Cloud DLP API
-async function detectPII(text) {
+const detectPII = traceable(async function detectPII(text) {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
@@ -231,10 +231,18 @@ async function detectPII(text) {
     // Fail closed - if DLP is down, block the message to be safe
     return ['PII Detection Service Unavailable'];
   }
-}
+}, {
+  name: 'google_dlp_detect_pii',
+  tags: ['google-dlp', 'pii-detection', 'security'],
+  metadata: {
+    provider: 'Google Cloud DLP',
+    location: 'us',
+    detectorCount: 8,
+  },
+});
 
 // Redact PII from text using Google Cloud DLP API
-async function redactPII(text) {
+const redactPII = traceable(async function redactPII(text) {
   try {
     const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
     
@@ -275,7 +283,15 @@ async function redactPII(text) {
     // Return [REDACTED] as fallback
     return '[REDACTED - PII DETECTED]';
   }
-}
+}, {
+  name: 'google_dlp_redact_pii',
+  tags: ['google-dlp', 'pii-redaction', 'data-protection'],
+  metadata: {
+    provider: 'Google Cloud DLP',
+    location: 'us',
+    transformationType: 'replaceWithInfoType',
+  },
+});
 
 // Prompt Injection Detection Patterns
 const INJECTION_PATTERNS = [
@@ -394,6 +410,33 @@ function createInjectionWarning() {
   };
 }
 
+// Check content moderation using OpenAI Moderation API
+const checkContentModeration = traceable(async function checkContentModeration(text) {
+  try {
+    const moderation = await openaiClient.moderations.create({ input: text });
+    if (moderation.results[0].flagged) {
+      const flaggedCategories = moderation.results[0].categories;
+      return {
+        flagged: true,
+        flaggedCategories: flaggedCategories,
+        categories: Object.keys(flaggedCategories).filter(k => flaggedCategories[k]),
+        scores: moderation.results[0].category_scores,
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error('Content moderation check failed:', error.message);
+    return null;
+  }
+}, {
+  name: 'openai_content_moderation',
+  tags: ['openai', 'content-moderation', 'safety'],
+  metadata: {
+    provider: 'OpenAI',
+    model: 'text-moderation-latest',
+  },
+});
+
 // Internal function that does the actual detection (not traced)
 async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
   // 1. PII Detection
@@ -408,20 +451,15 @@ async function _checkComplianceGuardrailsInternal(messageText, userId, channelTy
   }
 
   // 2. Content Moderation (OpenAI)
-  try {
-    const moderation = await openaiClient.moderations.create({ input: messageText });
-    if (moderation.results[0].flagged) {
-      const flaggedCategories = moderation.results[0].categories;
-      console.log(`Content policy violation from user ${userId}:`, flaggedCategories);
-      return {
-        warning: createContentWarning(flaggedCategories),
-        eventType: 'content_flagged',
-        categories: Object.keys(flaggedCategories).filter(k => flaggedCategories[k]),
-        scores: moderation.results[0].category_scores,
-      };
-    }
-  } catch (error) {
-    console.error('Content moderation check failed:', error.message);
+  const moderationResult = await checkContentModeration(messageText);
+  if (moderationResult) {
+    console.log(`Content policy violation from user ${userId}:`, moderationResult.categories);
+    return {
+      warning: createContentWarning(moderationResult.flaggedCategories),
+      eventType: 'content_flagged',
+      categories: moderationResult.categories,
+      scores: moderationResult.scores,
+    };
   }
 
   // 3. Prompt Injection Detection
