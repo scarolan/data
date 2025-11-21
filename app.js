@@ -455,10 +455,18 @@ const checkContentModeration = traceable(async function checkContentModeration(t
 
 // Internal function that does the actual detection - traced to capture tool calls
 const _checkComplianceGuardrailsInternal = traceable(async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
+  // Get the current run tree to add tags dynamically
+  const runTree = getCurrentRunTree();
+  
   // 1. PII Detection
   const piiDetected = await detectPII(messageText);
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
+    
+    // Add violation tag
+    if (runTree) {
+      runTree.tags = [...(runTree.tags || []), 'violation', 'pii-detected'];
+    }
     
     // Log redacted version to LangSmith (nested inside this trace)
     const redactedText = await redactPII(messageText);
@@ -482,6 +490,11 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (moderationResult) {
     console.log(`Content policy violation from user ${userId}:`, moderationResult.categories);
     
+    // Add violation tag
+    if (runTree) {
+      runTree.tags = [...(runTree.tags || []), 'violation', 'content-flagged'];
+    }
+    
     // Log to LangSmith (nested inside this trace)
     await checkComplianceGuardrails({
       redactedText: messageText, // No PII to redact
@@ -503,6 +516,11 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   if (detectPromptInjection(messageText)) {
     console.log(`Prompt injection detected from user ${userId}`);
     
+    // Add violation tag
+    if (runTree) {
+      runTree.tags = [...(runTree.tags || []), 'violation', 'prompt-injection'];
+    }
+    
     // Log to LangSmith (nested inside this trace)
     await checkComplianceGuardrails({
       redactedText: messageText,
@@ -517,6 +535,11 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       eventType: 'prompt_injection_blocked',
       messageLength: messageText.length,
     };
+  }
+
+  // All checks passed - add success tag
+  if (runTree) {
+    runTree.tags = [...(runTree.tags || []), 'passed', 'no-violations'];
   }
 
   return null;
