@@ -21,6 +21,10 @@
 // - New feature: Enhanced logging for user interactions
 ///////////////////////////////////////////////////////////////
 
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
+
 // Get bot personality from environment variable or use default
 // const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
 
@@ -472,13 +476,14 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       runTree.tags = [...(runTree.tags || []), 'violation', 'pii-detected'];
     }
     
-    // Log redacted version to LangSmith (nested inside this trace)
+    // Log to LangSmith (nested inside this trace)
     await checkComplianceGuardrails({
       redactedText: redactedText,
       userId: userId,
       channelType: channelType,
       eventType: 'sensitive_data_blocked',
-      eventDetails: { detectedTypes: piiDetected }
+      eventDetails: { detectedTypes: piiDetected },
+      isPII: true  // Flag to indicate this needs redaction
     });
     
     return {
@@ -505,7 +510,8 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       userId: userId,
       channelType: channelType,
       eventType: 'content_flagged',
-      eventDetails: { categories: moderationResult.categories }
+      eventDetails: { categories: moderationResult.categories },
+      isPII: false  // Flag to indicate no redaction needed
     });
     
     return {
@@ -532,7 +538,8 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
       userId: userId,
       channelType: channelType,
       eventType: 'prompt_injection_blocked',
-      eventDetails: { messageLength: messageText.length }
+      eventDetails: { messageLength: messageText.length },
+      isPII: false  // Flag to indicate no redaction needed
     });
     
     return {
@@ -553,10 +560,13 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   name: 'ComplianceCheck',
   run_type: 'chain',
   tags: ['compliance', 'guardrails', 'security-scan'],
-  // Mask the message text in LangSmith traces to prevent logging plaintext PII
+  // Conditionally mask message text only for PII checks
   processInputs: (inputs) => {
+    // Only redact if this is a PII check
+    const shouldRedact = inputs.isPII === true;
+    
     return {
-      messageText: '[REDACTED - Compliance & Security Scan]',
+      messageText: shouldRedact ? '[REDACTED - Sensitive Data Scan]' : inputs.messageText,
       userId: inputs.userId,
       channelType: inputs.channelType
     };
