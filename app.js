@@ -240,6 +240,13 @@ const detectPII = traceable(async function detectPII(text) {
     location: 'us',
     detectorCount: 8,
   },
+  // Hide input text in LangSmith traces to prevent logging potentially sensitive data
+  processInputs: (inputs) => {
+    return {
+      text: '[Input hidden for security - scanning for PII]',
+      inputLength: inputs[0]?.length || 0
+    };
+  },
 });
 
 // Redact PII from text using Google Cloud DLP API
