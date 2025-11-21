@@ -293,6 +293,12 @@ const redactPII = traceable(async function redactPII(text) {
     location: 'us',
     transformationType: 'replaceWithInfoType',
   },
+  // Mask the input text in LangSmith traces to prevent logging plaintext PII
+  processInputs: (inputs) => {
+    return {
+      text: '[SENSITIVE_DATA_REDACTED_FOR_TRACE]'
+    };
+  },
 });
 
 // Prompt Injection Detection Patterns
@@ -446,6 +452,17 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   const piiDetected = await detectPII(messageText);
   if (piiDetected.length > 0) {
     console.log(`PII detected from user ${userId}:`, piiDetected);
+    
+    // Log redacted version to LangSmith (nested inside this trace)
+    const redactedText = await redactPII(messageText);
+    await checkComplianceGuardrails({
+      redactedText: redactedText,
+      userId: userId,
+      channelType: channelType,
+      eventType: 'pii_blocked',
+      eventDetails: { detectedTypes: piiDetected }
+    });
+    
     return {
       warning: createPIIWarning(piiDetected),
       eventType: 'pii_blocked',
@@ -457,6 +474,16 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   const moderationResult = await checkContentModeration(messageText);
   if (moderationResult) {
     console.log(`Content policy violation from user ${userId}:`, moderationResult.categories);
+    
+    // Log to LangSmith (nested inside this trace)
+    await checkComplianceGuardrails({
+      redactedText: messageText, // No PII to redact
+      userId: userId,
+      channelType: channelType,
+      eventType: 'content_flagged',
+      eventDetails: { categories: moderationResult.categories }
+    });
+    
     return {
       warning: createContentWarning(moderationResult.flaggedCategories),
       eventType: 'content_flagged',
@@ -468,6 +495,16 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
   // 3. Prompt Injection Detection
   if (detectPromptInjection(messageText)) {
     console.log(`Prompt injection detected from user ${userId}`);
+    
+    // Log to LangSmith (nested inside this trace)
+    await checkComplianceGuardrails({
+      redactedText: messageText,
+      userId: userId,
+      channelType: channelType,
+      eventType: 'prompt_injection_blocked',
+      eventDetails: { messageLength: messageText.length }
+    });
+    
     return {
       warning: createInjectionWarning(),
       eventType: 'prompt_injection_blocked',
@@ -1053,15 +1090,6 @@ async function clearThinking(channel, ts) {
       // Check compliance guardrails before processing
       const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
       if (guardrailResult) {
-        // Log redacted version to LangSmith
-        await checkComplianceGuardrails({
-          redactedText: await redactPII(message.text),
-          userId: message.user,
-          channelType: message.channel_type,
-          eventType: guardrailResult.eventType,
-          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-        });
-        
         await say(guardrailResult.warning);
         return;
       }
@@ -1123,15 +1151,6 @@ async function clearThinking(channel, ts) {
       // Check compliance guardrails before processing
       const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
       if (guardrailResult) {
-        // Log redacted version to LangSmith
-        await checkComplianceGuardrails({
-          redactedText: await redactPII(message.text),
-          userId: message.user,
-          channelType: message.channel_type,
-          eventType: guardrailResult.eventType,
-          eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-        });
-        
         await say(guardrailResult.warning);
         return;
       }
@@ -1276,15 +1295,6 @@ async function clearThinking(channel, ts) {
     // Check compliance guardrails before processing
     const guardrailResult = await _checkComplianceGuardrailsInternal(message.text, message.user, message.channel_type);
     if (guardrailResult) {
-      // Log redacted version to LangSmith
-      await checkComplianceGuardrails({
-        redactedText: await redactPII(message.text),
-        userId: message.user,
-        channelType: message.channel_type,
-        eventType: guardrailResult.eventType,
-        eventDetails: { detectedTypes: guardrailResult.detectedTypes, categories: guardrailResult.categories }
-      });
-      
       await say(guardrailResult.warning);
       return;
     }
