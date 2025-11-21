@@ -466,11 +466,14 @@ const _checkComplianceGuardrailsInternal = traceable(async function _checkCompli
     // Redact the text first
     const redactedText = await redactSensitiveData(messageText);
     
-    // Update trace input to show redacted text instead of masked placeholder
+    // Update trace name, tags, and patch inputs to show redacted text
     if (runTree) {
       runTree.name = 'ComplianceCheckFailed';
       runTree.tags = [...(runTree.tags || []), 'violation', 'pii-detected'];
-      runTree.inputs = { messageText: redactedText, userId, channelType };
+      // Patch the run to update inputs with redacted text
+      await runTree.patch({
+        inputs: { messageText: redactedText, userId, channelType }
+      });
     }
     
     // Log redacted version to LangSmith (nested inside this trace)
