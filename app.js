@@ -440,8 +440,8 @@ const checkContentModeration = traceable(async function checkContentModeration(t
   },
 });
 
-// Internal function that does the actual detection (not traced)
-async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
+// Internal function that does the actual detection - traced to capture tool calls
+const _checkComplianceGuardrailsInternal = traceable(async function _checkComplianceGuardrailsInternal(messageText, userId, channelType) {
   // 1. PII Detection
   const piiDetected = await detectPII(messageText);
   if (piiDetected.length > 0) {
@@ -476,7 +476,11 @@ async function _checkComplianceGuardrailsInternal(messageText, userId, channelTy
   }
 
   return null;
-}
+}, {
+  name: 'check_compliance_guardrails_internal',
+  run_type: 'chain',
+  tags: ['compliance', 'guardrails', 'security-scan'],
+});
 
 // Traced wrapper that only logs redacted data
 const checkComplianceGuardrails = traceable(
