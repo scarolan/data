@@ -885,7 +885,7 @@ async function clearThinking(channel, ts) {
           },
           {
             type: 'image',
-            image_url: 'https://storage.googleapis.com/carolan_public/langchainlogo.jpg',
+            image_url: 'https://storage.googleapis.com/carolan_public/langchainlogo.png',
             alt_text: 'LangChain - a platform for developing applications powered by language models',
           },
         ],
