@@ -788,11 +788,6 @@ const processUserMessage = traceable(async function processUserMessage(userInput
       return { response: 'I apologize, but I cannot process an empty message. How may I assist you?', runId: null };
     }
 
-    // Run compliance guardrails for observability (traced but doesn't block here)
-    // Message handlers already checked and would have stopped if violations found
-    // This ensures clean messages still show compliance checks in traces
-    await _checkComplianceGuardrailsInternal(userInput, userId, channelType);
-
     // If the user asks about creating images, guide them to the /dalle command
     if (
       userInput.match(
