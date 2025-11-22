@@ -7,6 +7,7 @@
 // SLACK_APP_TOKEN - under your app's Basic Information page on api.slack.com
 // SLACK_BOT_USER_NAME - must match the short name of your bot user
 // OPENAI_API_KEY - get from here: https://platform.openai.com/account/api-keys
+// OPENAI_MODEL - (optional) OpenAI model to use for chat (default: gpt-5.1-chat-latest)
 // BOT_PERSONALITY - (optional) customize the bot's character and behavior
 // THINKING_MESSAGE - (optional) customize the "thinking" message shown while processing
 // LANGCHAIN_API_KEY - API key for LangSmith tracing and observability
@@ -662,10 +663,10 @@ console.log(
 const redisClient = new Redis(redisUrl);
 
 // Create LangChain ChatOpenAI instance
+// Model can be configured via OPENAI_MODEL env var, defaults to gpt-5.1-chat-latest
 const chatModel = new ChatOpenAI({
-  modelName: 'gpt-4o-mini',
+  modelName: process.env.OPENAI_MODEL || 'gpt-5.1-chat-latest',
   openAIApiKey: process.env.OPENAI_API_KEY,
-  temperature: 0.7,
 });
 
 // Function to get or create conversation chain with memory for each user
