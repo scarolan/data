@@ -1,0 +1,67 @@
+---
+config:
+  layout: dagre
+---
+flowchart TB
+    Start["User sends message in Slack"] --> CheckType{"Message Type?"}
+    CheckType -- DM/MPIM --> DirectFlow["Direct message flow"]
+    CheckType -- Mention --> MentionFlow["Bot mention"]
+    CheckType -- Keywords --> KeywordFlow["Keyword patterns"]
+    DirectFlow --> GuardrailCheck["_checkComplianceGuardrailsInternal"]
+    MentionFlow --> GuardrailCheck
+    KeywordFlow --> SimpleResponse["Simple responses
+danceparty, rickroll, etc."]
+    GuardrailCheck --> PIIDetect["detectSensitiveData
+Google Cloud DLP"]
+    PIIDetect -- PII Found --> RedactPII["redactSensitiveData
+Redact with DLP"]
+    PIIDetect -- No PII --> ContentMod["checkContentModeration
+OpenAI Moderation API"]
+    RedactPII --> LogPII["checkComplianceGuardrails
+Log redacted data to LangSmith"]
+    LogPII --> BlockPII["Return PII Warning
+Block message"]
+    ContentMod -- Flagged --> LogContent["checkComplianceGuardrails
+Log to LangSmith"]
+    ContentMod -- Clean --> PromptInject["detectPromptInjection
+Regex patterns"]
+    LogContent --> BlockContent["Return Content Warning
+Block message"]
+    PromptInject -- Detected --> LogInject["checkComplianceGuardrails
+Log to LangSmith"]
+    PromptInject -- Clean --> AllClear["All checks passed"]
+    LogInject --> BlockInject["Return Injection Warning
+Block message"]
+    AllClear --> ProcessMsg["processUserMessage
+LangChain + OpenAI"]
+    ProcessMsg --> Memory["BufferWindowMemory
+Redis chat history"]
+    Memory --> ChatGPT["GPT-4o-mini
+    Generate response"]
+    ChatGPT --> SaveMemory["Save to Redis
+24hr TTL"]
+    SaveMemory --> Response["Send response with
+feedback buttons"]
+    Response --> Feedback{"User clicks button?"}
+    Feedback -- 👍 --> PositiveFB["Log positive feedback
+to LangSmith"]
+    Feedback -- 👎 --> NegativeFB["Open modal for
+detailed feedback"]
+    NegativeFB --> LogNegative["Log negative feedback
+to LangSmith"]
+    BlockPII --> End["End"]
+    BlockContent --> End
+    BlockInject --> End
+    PositiveFB --> End
+    LogNegative --> End
+    SimpleResponse --> End
+
+    style GuardrailCheck fill:#ff9999
+    style PIIDetect fill:#ffcc99
+    style ContentMod fill:#ffcc99
+    style LogPII fill:#99ccff
+    style LogContent fill:#99ccff
+    style PromptInject fill:#ffcc99
+    style LogInject fill:#99ccff
+    style ProcessMsg fill:#99ff99
+    style ChatGPT fill:#99ff99

@@ -8,9 +8,14 @@
 // SLACK_BOT_USER_NAME - must match the short name of your bot user
 // OPENAI_API_KEY - get from here: https://platform.openai.com/account/api-keys
 // BOT_PERSONALITY - (optional) customize the bot's character and behavior
-//                   if not set, a default Star Trek Data personality is used
 // THINKING_MESSAGE - (optional) customize the "thinking" message shown while processing
-//                   if not set, a default Star Trek Data themed message is used
+// LANGCHAIN_API_KEY - API key for LangSmith tracing and observability
+// LANGSMITH_PROJECT - project name for organizing traces in LangSmith
+// LANGSMITH_TRACING - enable/disable LangSmith trace collection (true/false)
+// LANGCHAIN_CALLBACKS_BACKGROUND - run LangChain callbacks asynchronously (true/false)
+// LANGSMITH_PROMPT - hub reference for loading personality prompt (e.g., scarolan/data-personality)
+// GOOGLE_CLOUD_PROJECT_ID - Google Cloud project ID for DLP API access
+// GOOGLE_APPLICATION_CREDENTIALS - path to Google Cloud service account JSON key file
 //
 // Features:
 // - Interactive feedback buttons with modal for detailed negative feedback
@@ -39,7 +44,16 @@ const thinkingMessage = process.env.THINKING_MESSAGE || defaultThinkingMessage;
 
 // Validate required environment variables early to fail fast
 function validateRequiredEnv() {
-  const required = ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_BOT_USER_NAME', 'OPENAI_API_KEY'];
+  const required = [
+    'SLACK_BOT_TOKEN',
+    'SLACK_APP_TOKEN',
+    'SLACK_BOT_USER_NAME',
+    'OPENAI_API_KEY',
+    'LANGCHAIN_API_KEY',
+    'LANGSMITH_PROJECT',
+    'GOOGLE_CLOUD_PROJECT_ID',
+    'GOOGLE_APPLICATION_CREDENTIALS'
+  ];
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
     console.error('Missing required environment variables:', missing.join(', '));
@@ -61,7 +75,7 @@ function validateRequiredEnv() {
 }
 validateRequiredEnv();
 
-// Import required libraries
+// Import required packages
 import pkg from '@slack/bolt';
 const { App } = pkg;
 import { directMention } from '@slack/bolt';
