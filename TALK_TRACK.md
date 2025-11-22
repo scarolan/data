@@ -30,13 +30,17 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 *(Pivot to github repo for data)*
 
-"Let's look at the code behind Data. Here's an example of how LangChain packages make developing apps easy. This BufferWindowMemory class powers Data's android brain, giving him memory of previous chat interactions. It saved me a ton of custom work because I didn't have to build my own memory management from scratch. Data's code is open source and I'll share the link after the demo."
+"This is Lt. Commander Data, the chief operations officer of the Enterprise NCC-1701-D. He's also an AI chatbot written in Javascript."
+
+*(Pivot to BufferWindowMemory tab)*
+
+"Let's look at the code that powers Data. Here's an example of how LangChain packages make developing apps easy. This BufferWindowMemory class powers Data's android brain, giving him memory of previous chat interactions. It saved me a ton of custom work because I didn't have to build my own memory management from scratch. Data's code is open source and I'll share the link after the demo."
 
 ---
 
 ## Section 0: Basic Prompt Engineering (4 min)
 
-"Let's move on to the fun stuff and see what Data can do."
+"Let's move on to the fun stuff and see what Data can do. Here on the left you can see Data's system prompt stored here in LangSmith. Watch how it affects his responses."
 
 *(Send: "Hi Data! I'm super excited, this is my first ComicCon. How do I get to the Javits Center?")*
 
@@ -52,13 +56,13 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 "LangChain + LangSmith make prompt iteration fast: edit, test, and commit from the UI before pushing changes to production."
 
-*(Edit Data's prompt in LangSmith, add the party line, test, and commit)*
+*(Edit Data's prompt in LangSmith, change the party time, test, and commit)*
 
 *(Restart the data app)*
 
-*(Return to Slack and ask: "What's happening on Saturday?" to confirm the change)*
+*(Return to Slack and ask: "What's happening on Saturday night?" to confirm the change)*
 
-"Rapid prompt iteration allows us to change Data's behavior instantly, no redeploy needed."
+"Rapid prompt iteration allows us to change Data's behavior or even his entire personality instantly, no redeploy needed."
 
 "With LangChain you can easily test and fine-tune your prompts without redeploying your application. Even non-technical users can do it from the UI."
 
@@ -76,7 +80,9 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 "With LangChain you get conversation memory, context window management, error handling, and retry logic right out of the box—no need to reinvent the wheel."
 
-"In LangSmith, you can see the full trace: the conversation history retrieved from Redis is in the Chat prompt's input messages array."
+*(Switch to the traces tab and show the trace for the follow-up question.)*
+
+"In LangSmith, you can see the full trace: the conversation history retrieved from Redis is in the input messages array."
 
 "LangChain includes all the functions and methods you need to build an enterprise-grade AI agent—conversation memory, context management, and error handling are built-in, saving you months of development time."
 
@@ -88,11 +94,11 @@ Our mission is simple: help you build and ship AI agents faster—with the guard
 
 *(Send: "Kirk or Picard?")*
 
-"Here's the classic Star Trek question—Kirk or Picard?"
+"Here's the classic Star Trek question: Kirk or Picard?"
 
 "Watch Data dodge the question by being diplomatic."
 
-"Every response gets feedback buttons—this is your RLHF pipeline."
+"Every response gets feedback button. This is your RLHF (Reinforcement Learning from Human Feedback) pipeline."
 
 *(Click 👎)*
 
