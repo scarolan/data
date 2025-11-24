@@ -906,24 +906,21 @@ const processUserMessage = traceable(async function processUserMessage(userInput
   name: 'ProcessMessage', 
   tags: ['slack-chat', 'conversation'],
   // processInputs transforms the logged inputs for LangSmith display
-  // With 3 parameters, default format is { args: [param1, param2, param3] }
-  // We extract just the user's message text for clean display
+  // Function signature: processUserMessage(userInput, userId, channelType)
+  // Args array: [userInput, userId, channelType]
+  // We want to display the first parameter (userInput) as the input in LangSmith
   processInputs: (inputs) => {
     const args = (inputs && inputs.args) || [];
-    // Prefer a plausible user message: a non-empty string that doesn't look like a Slack user ID
-    const slackUserIdRe = /^U[A-Z0-9]{6,}$/i;
-    let candidate = null;
-    for (const a of args) {
-      if (typeof a === 'string' && a.trim().length > 0 && !slackUserIdRe.test(a.trim())) {
-        candidate = a.trim();
-        break;
-      }
+    // The first argument is always the user's message text
+    const userInput = args[0];
+    
+    // If it's a string and non-empty, use it; otherwise show a fallback
+    if (typeof userInput === 'string' && userInput.trim().length > 0) {
+      return { input: userInput.trim() };
     }
-    // Fallbacks: first string arg, or JSON-stringified args if nothing else
-    if (!candidate) {
-      candidate = args.find(a => typeof a === 'string') || JSON.stringify(args);
-    }
-    return { input: candidate };
+    
+    // Fallback for malformed inputs
+    return { input: '[No message text provided]' };
   }
 });
 
