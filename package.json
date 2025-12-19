@@ -23,6 +23,7 @@
     "@keyv/redis": "^5.1.1",
     "@slack/bolt": "^3.17.1",
     "chatgpt": "^5.2.5",
+    "dotenv": "^16.4.5",
     "keyv": "^5.5.0",
     "node-fetch": "^3.3.2",
     "openai": "^4.28.0"

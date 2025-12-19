@@ -2,7 +2,10 @@
 // A bolt.js Slack chatbot augmented with OpenAI ChatGPT
 // Requires a running Redis instance to persist the bot's memory
 //
-// Make sure you export the required environment variables:
+// Load environment variables from .env file (must be first)
+import 'dotenv/config';
+//
+// Make sure you set the required environment variables in .env:
 // SLACK_BOT_TOKEN - under the OAuth Permissions page on api.slack.com
 // SLACK_APP_TOKEN - under your app's Basic Information page on api.slack.com
 // SLACK_BOT_USER_NAME - must match the short name of your bot user
