@@ -20,6 +20,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@google/genai": "^2.8.0",
     "@keyv/redis": "^5.1.1",
     "@slack/bolt": "^3.17.1",
     "chatgpt": "^5.2.5",

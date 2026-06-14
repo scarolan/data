@@ -15,7 +15,7 @@ import 'dotenv/config';
 // THINKING_MESSAGE - (optional) customize the "thinking" message shown while processing
 //                   if not set, a default Star Trek Data themed message is used
 //
-// Note: The /dalle slash command uses an asynchronous approach to handle
+// Note: The /image slash command uses an asynchronous approach to handle
 // Slack timeout limitations, generating the image in the background and
 // posting directly to the channel when complete.
 ///////////////////////////////////////////////////////////////
@@ -49,7 +49,7 @@ import pkg from '@slack/bolt';
 const { App } = pkg;
 import { directMention } from '@slack/bolt';
 import { ChatGPTAPI } from 'chatgpt';
-import OpenAI from 'openai';
+import { GoogleGenAI } from '@google/genai';
 import Keyv from 'keyv';
 import KeyvRedis from '@keyv/redis';
 import fetch from 'node-fetch';
@@ -142,45 +142,42 @@ function cleanLocalLlmResponse(text) {
   return text.replace(localLlmTokens, '').trim();
 }
 
-// OpenAI API client for generating images
-const openaiClient = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+// Gemini client for image generation (Nano Banana 2)
+const geminiImageModel = process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image';
+const geminiClient = process.env.GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
+  : null;
 
-// Function to generate an image with DALL-E (model: gpt-image-1)
 async function generateImage(prompt) {
   try {
-    console.log(`Generating DALL-E image with prompt: "${prompt}"`);
+    console.log(`Generating Gemini image with model "${geminiImageModel}", prompt: "${prompt}"`);
 
     if (!prompt || prompt.trim() === '') {
       throw new Error('Empty prompt provided for image generation');
     }
 
-    console.log('Calling OpenAI API with parameters:', {
-      prompt: prompt,
-      n: 1,
-      size: '1024x1024',
-      model: 'gpt-image-1',
-    });
-
-    const response = await openaiClient.images.generate({
-      prompt,
-      n: 1,
-      size: '1024x1024',
-      model: 'gpt-image-1',
-    });
-
-    if (!response || !response.data || !response.data[0] || !response.data[0].b64_json) {
-      console.error('Invalid response from OpenAI:', JSON.stringify(response));
-      throw new Error('Received invalid response from image generation API');
+    if (!geminiClient) {
+      throw new Error('GEMINI_API_KEY is not configured');
     }
 
-    // Convert to buffer and log size information
-    const imageBuffer = Buffer.from(response.data[0].b64_json, 'base64');
+    const response = await geminiClient.models.generateContent({
+      model: geminiImageModel,
+      contents: prompt,
+    });
+
+    const parts = response?.candidates?.[0]?.content?.parts;
+    const imagePart = parts?.find((p) => p.inlineData?.data);
+
+    if (!imagePart) {
+      const textPart = parts?.find((p) => p.text)?.text;
+      console.error('No image data in Gemini response. Text returned:', textPart);
+      throw new Error(textPart || 'Received invalid response from image generation API');
+    }
+
+    const imageBuffer = Buffer.from(imagePart.inlineData.data, 'base64');
     const fileSizeKB = (imageBuffer.length / 1024).toFixed(2);
     console.log(`Image generated successfully, size: ${fileSizeKB}KB`);
 
-    // Warn if image size is large
     if (imageBuffer.length > 5 * 1024 * 1024) {
       console.warn(
         `WARNING: Generated image is very large (${fileSizeKB}KB), may exceed Slack limits`
@@ -190,13 +187,6 @@ async function generateImage(prompt) {
     return imageBuffer;
   } catch (error) {
     console.error('Error generating image:', error);
-    // Add more detailed error information
-    if (error.response) {
-      console.error('OpenAI API error details:', {
-        status: error.response.status,
-        data: error.response.data,
-      });
-    }
     throw error;
   }
 }
@@ -217,13 +207,13 @@ async function handleMessage(message, _client = null, _channel = null) {
       return 'I apologize, but I cannot process an empty message. How may I assist you?';
     }
 
-    // If the user asks about creating images, guide them to the /dalle command
+    // If the user asks about creating images, guide them to the /image command
     if (
       message.text.match(
         /(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i
       )
     ) {
-      return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
+      return `I'd be happy to assist with image generation. Please use the /image slash command followed by your prompt. For example: \`/image a sunset over mountains\``;
     }
 
     // Process the message with OpenAI
@@ -595,12 +585,12 @@ async function clearThinking(channel, ts) {
         '',
         '# Slash commands:',
         '/askgpt <question> - Ask ChatGPT and get an ephemeral reply',
-        '/dalle <prompt>    - Generate an image with DALL·E',
+        '/image <prompt>    - Generate an image with Gemini',
         '',
         `# Address the bot directly with @${process.env.SLACK_BOT_USER_NAME} syntax:`,
         `@${process.env.SLACK_BOT_USER_NAME} the rules - Explains Asimov's laws of robotics`,
         `@${process.env.SLACK_BOT_USER_NAME} dad joke  - Provides a random dad joke`,
-        `@${process.env.SLACK_BOT_USER_NAME} image <prompt> - Create an image with DALL·E`,
+        `@${process.env.SLACK_BOT_USER_NAME} image <prompt> - Create an image with Gemini`,
         '',
         `# All other queries will be handled by ChatGPT, so you can ask it anything!`,
         `@${process.env.SLACK_BOT_USER_NAME} what is the capital of Australia?`,
@@ -706,30 +696,30 @@ async function clearThinking(channel, ts) {
     }
   });
 
-  // Slash command to generate an image with DALL-E
-  app.command('/dalle', async ({ command, ack, respond, client, context }) => {
-    console.log('DALLE COMMAND RECEIVED:', JSON.stringify(command, null, 2));
+  // Slash command to generate an image with Gemini (Nano Banana 2)
+  app.command('/image', async ({ command, ack, respond, client, context }) => {
+    console.log('IMAGE COMMAND RECEIVED:', JSON.stringify(command, null, 2));
     console.log('Handler context:', JSON.stringify(context, null, 2));
     console.log('Command channel:', command.channel_id);
     console.log('Command user:', command.user_id);
 
     try {
       // Acknowledge the command immediately - CRITICAL for Slack timeouts
-      console.log('Acknowledging DALLE command...');
+      console.log('Acknowledging /image command...');
       await ack();
-      console.log('DALLE command acknowledged successfully');
+      console.log('/image command acknowledged successfully');
 
       if (!command.text || command.text.trim() === '') {
         console.log('Empty prompt provided, sending error response');
         await respond({
-          text: 'I need a description to generate an image. Please provide a prompt after the /dalle command.',
+          text: 'I need a description to generate an image. Please provide a prompt after the /image command.',
           response_type: 'ephemeral',
         });
         return;
       }
 
       const prompt = command.text;
-      console.log('Processing DALL-E image request:', prompt);
+      console.log('Processing image request:', prompt);
 
       // Send an initial progress message
       await respond({
@@ -739,7 +729,7 @@ async function clearThinking(channel, ts) {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `:art: *Generating image with DALL·E*`,
+              text: `:art: *Generating image with Gemini*`,
             },
           },
           {
@@ -767,7 +757,7 @@ async function clearThinking(channel, ts) {
       setTimeout(async () => {
         try {
           // Generate the image
-          console.log('Calling OpenAI API for image generation');
+          console.log('Calling Gemini API for image generation');
           let imageBuffer = await generateImage(prompt);
 
           if (!imageBuffer) {
@@ -785,10 +775,10 @@ async function clearThinking(channel, ts) {
               token: process.env.SLACK_BOT_TOKEN,
               channel_id: command.channel_id,
               file: imageBuffer,
-              filename: 'dalle-image.png',
+              filename: 'gemini-image.png',
               title: prompt,
-              initial_comment: `Here's the DALL·E image for: "${prompt}"`,
-              alt_text: `DALL-E generated image for: ${prompt}`,
+              initial_comment: `Here's the Gemini image for: "${prompt}"`,
+              alt_text: `Gemini generated image for: ${prompt}`,
             });
 
             // Try to extract file id defensively from common shapes
@@ -861,10 +851,10 @@ async function clearThinking(channel, ts) {
                 token: process.env.SLACK_BOT_TOKEN,
                 channels: command.channel_id,
                 file: imageBuffer,
-                filename: 'dalle-image.png',
+                filename: 'gemini-image.png',
                 filetype: 'png',
                 title: prompt,
-                initial_comment: `Here's the DALL·E image for: "${prompt}"`,
+                initial_comment: `Here's the Gemini image for: "${prompt}"`,
               });
 
               console.log(
@@ -887,7 +877,7 @@ async function clearThinking(channel, ts) {
                 await client.chat.postMessage({
                   token: process.env.SLACK_BOT_TOKEN,
                   channel: command.channel_id,
-                  text: `Here's the DALL·E image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
+                  text: `Here's the Gemini image for: "${prompt}" (I had trouble uploading the image as a file, but the generation was successful)`,
                 });
 
                 console.log('Posted fallback message about the image');
@@ -915,7 +905,7 @@ async function clearThinking(channel, ts) {
         }
       }, 100); // Short delay to ensure the acknowledgment completes first
     } catch (error) {
-      console.error('Error in initial /dalle command handling:', error);
+      console.error('Error in initial /image command handling:', error);
 
       // Only respond if we haven't acknowledged yet
       try {

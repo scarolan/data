@@ -9,8 +9,8 @@ features:
     display_name: Data
     always_online: true
   slash_commands:
-    - command: /dalle
-      description: Generate an image with DALL-E
+    - command: /image
+      description: Generate an image with Gemini
       usage_hint: '<prompt>'
       should_escape: false
 oauth_config:
