@@ -155,6 +155,47 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 
 **Note: tool calling is intentionally not part of the architecture.** It was experimented with (see git history around PR #30 and the revert that followed) and removed: the gemma family — Data's preferred backend for its strong vision — emits tool calls as inline text rather than Ollama's structured `tool_calls` field, and most of the original tool registry just duplicated regex matchers that already worked. Image generation is the `/image` slash command (Data also nudges users toward it when they ask for an image in chat via `isImageRequest` + `IMAGE_REQUEST_GUIDANCE`).
 
+## Model selection notes (lessons from PR #30)
+
+These are practical, hard-earned notes about which Ollama models do what well, and what's worth knowing when picking `OLLAMA_MODEL`. Save your future self a debugging session.
+
+### gemma4:31b (current default)
+- **Vision: excellent.** Identified a "communist cat meme" correctly including the hammer-and-sickle symbolism and explained the joke premise unprompted. Strong recognition + sophisticated comprehension.
+- **Tool calling: broken.** Knows what tools are, knows their schemas, but emits calls as plain text — e.g. `<call:generate_image{prompt:"..."}><tool_call|>` — instead of populating Ollama's structured `message.tool_calls` field. Wire-format / template issue, not a prompting issue. Same behavior on `gemma4-openhands:latest` (the agent fine-tune of the same family), so it's a family-wide limitation, not a base-model thing.
+- **Thinking: emits `message.thinking` even when `think:` param is NOT sent.** Found this the hard way when the inline thinking block appeared in Slack despite `OLLAMA_THINK` being unset.
+- Verdict: use for chat + vision. Don't try to use it for tools.
+
+### qwen3.6:27b
+- **Tool calling: reliable.** Tested against `generate_image` and a 7-tool registry; structured `tool_calls` came back cleanly with rich, well-formed args.
+- **Vision: not confirmed.** Likely no (Qwen vision is a separate `qwen2.5-vl` family). Didn't test live.
+- Verdict: pick this when tools matter and vision doesn't.
+
+### What's pulled on `kepler.local`
+As of this writing: `gemma4:latest`, `gemma4:31b`, `gemma4-openhands:latest`, `llama3.3:70b-instruct-q8_0` (75GB, slow), `qwen3.6:27b`, `qwen3.6-openhands:latest`, `qwen3.6:35b-a3b`, `qwen3-coder-next:latest`, `qwen3-coder-openhands:latest`, `devstral-small-2:latest`, `nomic-embed-text:latest`. None of these are vision+tools-in-one. If you ever want both natively, pull something like `qwen2.5-vl:32b` or `mistral-small3.1` and try.
+
+### Why tool calling was removed
+1. **6 of 7 tools duplicated regex matchers** (`tell_dad_joke`, `state_asimovs_laws`, `show_help`, `start_dance_party`, `play_rickroll`, `play_tiktok`) — slower and less reliable than the existing exact-phrase triggers.
+2. The one tool that did benefit from LLM intent extraction (`generate_image`) was unreliable on gemma — and gemma is the right model for everything else.
+3. `/image` slash command already covers image generation reliably with no LLM round-trip.
+4. The tool registry + dispatch loop was ~800 lines of code for net-negative reliability.
+
+If you ever bring tools back: make sure the model in production actually emits structured `tool_calls` before you wire it up. Test live against a 2-tool registry first.
+
+### Lessons from shipping vision (#26)
+- Slack tags file uploads with `subtype: 'file_share'`. The pre-#26 handler had `if (message.subtype) return;` which silently dropped every upload. Fix: allow `file_share` through, skip only the genuinely-noise subtypes.
+- Image fetch needs the bot token as a bearer header against `file.url_private` — these aren't anonymous URLs.
+- Don't persist image bytes to convoStore. The Slack URLs expire and the bytes are big. Persist only the text portion of the user turn.
+- Add explicit log lines around vision (`Vision: extracted ...`, `Ollama chat -> model with N image(s)`). When the pipeline silently dropped uploads pre-fix, we had NO observability — the bot just looked broken.
+
+### Lessons from shipping reactions UX (#28)
+- Requires `reactions:read` and `reactions:write` scopes in `manifest.yaml`.
+- After adding scopes, you MUST re-sync the manifest in api.slack.com AND reinstall the app to the workspace. Failure mode: `missing_scope` errors on every `reactions.add` call, no reaction ever appears, bot looks unresponsive while it's actually working fine.
+
+### Why thinking-trace rendering was suppressed (#27)
+- gemma4 emits `message.thinking` even without `think:` set, and the traces are *long* (full chain-of-thought paragraphs).
+- The inline Block Kit rendering — italicized "Thinking: …" context block above the reply — made every message a wall of text.
+- The `:brain:` reaction is enough of an "I'm working on this" UI. The trace plumbing is still there (`result.thinking` is captured by the adapter and surfaced by `handleMessage`); we just don't render it.
+
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 
 **Adding a function that calls an external API:** Don't instantiate the client at module scope. Add it to `buildDeps()` in `lib/deps.js`, pass it through `deps`, and accept the client as a parameter on the function so tests can inject a fake (see `generateImage` for the pattern).
