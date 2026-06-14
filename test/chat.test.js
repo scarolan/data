@@ -30,6 +30,22 @@ function makeFakeChat({ reply = 'pong', shouldThrow = null } = {}) {
   };
 }
 
+// A chat fake that walks through a predetermined sequence of responses
+// (each call consumes one). Lets tests script multi-turn tool dispatch.
+function makeScriptedChat(responses) {
+  const calls = [];
+  let i = 0;
+  return {
+    calls,
+    async chat({ messages, tools }) {
+      calls.push({ messages, tools });
+      const next = responses[Math.min(i, responses.length - 1)];
+      i++;
+      return next;
+    },
+  };
+}
+
 test('handleMessage returns an apology for empty text without calling chat', async () => {
   const chat = makeFakeChat();
   const result = await handleMessage(
@@ -46,19 +62,16 @@ test('handleMessage persists per-user history across calls', async () => {
 
   const first = await handleMessage({ text: 'hi', user: 'U1' }, { chat, convoStore });
   assert.strictEqual(first, 'hi back');
-  // First turn: history is just the new user message.
   assert.deepStrictEqual(chat.calls[0].messages, [{ role: 'user', content: 'hi' }]);
 
   const second = await handleMessage({ text: 'still there?', user: 'U1' }, { chat, convoStore });
   assert.strictEqual(second, 'hi back');
-  // Second turn: history includes both prior turns plus the new user message.
   assert.deepStrictEqual(chat.calls[1].messages, [
     { role: 'user', content: 'hi' },
     { role: 'assistant', content: 'hi back' },
     { role: 'user', content: 'still there?' },
   ]);
 
-  // Stored history reflects the post-call state.
   const stored = await convoStore.get('convo:U1');
   assert.strictEqual(stored.length, 4);
   assert.strictEqual(stored[3].content, 'hi back');
@@ -71,7 +84,6 @@ test('handleMessage keeps per-user history isolated', async () => {
   await handleMessage({ text: 'hi from U1', user: 'U1' }, { chat, convoStore });
   await handleMessage({ text: 'hi from U2', user: 'U2' }, { chat, convoStore });
 
-  // U2's first call must not see U1's history.
   assert.deepStrictEqual(chat.calls[1].messages, [{ role: 'user', content: 'hi from U2' }]);
 });
 
@@ -84,14 +96,12 @@ test('handleMessage trims history to the configured limit', async () => {
   }
 
   const stored = await convoStore.get('convo:U1');
-  // Each turn appends 2 messages; with limit=4 we keep only the last 2 turns.
   assert.strictEqual(stored.length, 4);
   assert.strictEqual(stored[0].content, 'msg 3');
   assert.strictEqual(stored[2].content, 'msg 4');
 });
 
 test('handleMessage rehydrates history from convoStore on cold start', async () => {
-  // Simulates a process restart: history is already in Redis from a prior session.
   const convoStore = makeFakeConvoStore({
     'convo:U1': [
       { role: 'user', content: 'remember this' },
@@ -135,6 +145,149 @@ test('handleMessage does not persist history when the backend errors', async () 
   await handleMessage({ text: 'hi', user: 'U1' }, { chat, convoStore });
 
   const stored = await convoStore.get('convo:U1');
-  // Prior history is intact; failed turn was not appended.
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
+});
+
+// --- Tool dispatch ---------------------------------------------------------
+
+test('handleMessage executes a tool call and feeds the result back to the model', async () => {
+  const toolCalls = [];
+  const tools = [
+    {
+      name: 'echo',
+      description: 'returns its arg',
+      parameters: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] },
+      async execute({ x }) {
+        toolCalls.push(x);
+        return `echoed: ${x}`;
+      },
+    },
+  ];
+  const chat = makeScriptedChat([
+    { text: '', toolCalls: [{ name: 'echo', args: { x: 'hello' } }] },
+    { text: 'I echoed it for you.' },
+  ]);
+
+  const reply = await handleMessage(
+    { text: 'echo hello', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore(), tools }
+  );
+
+  assert.strictEqual(reply, 'I echoed it for you.');
+  assert.deepStrictEqual(toolCalls, ['hello']);
+
+  // Second model call sees the assistant turn with tool_calls + the tool result.
+  const second = chat.calls[1].messages;
+  assert.strictEqual(second[1].role, 'assistant');
+  assert.deepStrictEqual(second[1].toolCalls, [{ name: 'echo', args: { x: 'hello' } }]);
+  assert.strictEqual(second[2].role, 'tool');
+  assert.strictEqual(second[2].toolName, 'echo');
+  assert.strictEqual(second[2].content, 'echoed: hello');
+});
+
+test('handleMessage persists only the final assistant text — tool traffic is ephemeral', async () => {
+  const tools = [
+    {
+      name: 'noop',
+      description: 'does nothing',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        return 'ok';
+      },
+    },
+  ];
+  const chat = makeScriptedChat([
+    { text: '', toolCalls: [{ name: 'noop', args: {} }] },
+    { text: 'Final answer.' },
+  ]);
+  const convoStore = makeFakeConvoStore();
+
+  await handleMessage({ text: 'go', user: 'U1' }, { chat, convoStore, tools });
+
+  const stored = await convoStore.get('convo:U1');
+  // Only user + final assistant — no tool round-trip in persistent history.
+  assert.strictEqual(stored.length, 2);
+  assert.deepStrictEqual(stored, [
+    { role: 'user', content: 'go' },
+    { role: 'assistant', content: 'Final answer.' },
+  ]);
+});
+
+test('handleMessage surfaces tool-execution errors as model-visible strings', async () => {
+  const tools = [
+    {
+      name: 'boom',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        throw new Error('kaboom');
+      },
+    },
+  ];
+  const chat = makeScriptedChat([
+    { text: '', toolCalls: [{ name: 'boom', args: {} }] },
+    { text: 'Sorry, that did not work.' },
+  ]);
+
+  const reply = await handleMessage(
+    { text: 'try it', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore(), tools }
+  );
+  assert.strictEqual(reply, 'Sorry, that did not work.');
+  const toolMsg = chat.calls[1].messages.find((m) => m.role === 'tool');
+  assert.match(toolMsg.content, /kaboom/);
+});
+
+test('handleMessage returns an unknown-tool error message when the model hallucinates a tool', async () => {
+  const chat = makeScriptedChat([
+    { text: '', toolCalls: [{ name: 'nonexistent', args: {} }] },
+    { text: 'Pretend that worked.' },
+  ]);
+
+  await handleMessage(
+    { text: 'go', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore(), tools: [] }
+  );
+  const toolMsg = chat.calls[1].messages.find((m) => m.role === 'tool');
+  assert.match(toolMsg.content, /unknown tool/);
+});
+
+test('handleMessage handles multiple tool calls in one turn', async () => {
+  const executed = [];
+  const tools = [
+    {
+      name: 'a',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        executed.push('a');
+        return 'result-a';
+      },
+    },
+    {
+      name: 'b',
+      description: '',
+      parameters: { type: 'object', properties: {} },
+      async execute() {
+        executed.push('b');
+        return 'result-b';
+      },
+    },
+  ];
+  const chat = makeScriptedChat([
+    {
+      text: '',
+      toolCalls: [
+        { name: 'a', args: {} },
+        { name: 'b', args: {} },
+      ],
+    },
+    { text: 'Both done.' },
+  ]);
+
+  await handleMessage(
+    { text: 'go', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore(), tools }
+  );
+  assert.deepStrictEqual(executed, ['a', 'b']);
 });

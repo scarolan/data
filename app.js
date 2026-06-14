@@ -1,32 +1,19 @@
 ///////////////////////////////////////////////////////////////
-// A bolt.js Slack chatbot augmented with OpenAI ChatGPT
-// Requires a running Redis instance to persist the bot's memory
-//
-// Load environment variables from .env file (must be first)
-import 'dotenv/config';
-//
-// Make sure you set the required environment variables in .env:
-// SLACK_BOT_TOKEN - under the OAuth Permissions page on api.slack.com
-// SLACK_APP_TOKEN - under your app's Basic Information page on api.slack.com
-// SLACK_BOT_USER_NAME - must match the short name of your bot user
-// OPENAI_API_KEY - get from here: https://platform.openai.com/account/api-keys
-// BOT_PERSONALITY - (optional) customize the bot's character and behavior
-// THINKING_MESSAGE - (optional) customize the "thinking" message
-//
-// Note: The /image slash command uses an asynchronous approach to handle
-// Slack timeout limitations, generating the image in the background and
-// posting directly to the channel when complete.
+// A bolt.js Slack chatbot. Wires Bolt event handlers onto pure
+// helpers in lib/. Conversation goes through native Ollama or
+// Gemini SDKs; tool calls are dispatched inside lib/chat.js.
 ///////////////////////////////////////////////////////////////
 
+import 'dotenv/config';
 import { directMention } from '@slack/bolt';
 import fetch from 'node-fetch';
 
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
 import { handleMessage } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
+import { makeTools } from './lib/tools.js';
 import {
   ASIMOV_RULES,
-  IMAGE_REQUEST_GUIDANCE,
   RICKROLL_BLOCKS,
   TIKTOK_BLOCKS,
   buildDancePartyMessage,
@@ -35,7 +22,6 @@ import {
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
-  isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
@@ -72,6 +58,35 @@ async function clearThinking(app, channel, ts) {
   } catch (err) {
     console.log('Error deleting thinking message:', err && err.message ? err.message : err);
   }
+}
+
+// Construct a tools registry bound to a specific Slack channel so tool side
+// effects (image upload, joke post, etc.) land in the right place. Cheap to
+// build per-message — the closures only capture a handful of values.
+function buildToolsFor(deps, channel) {
+  const { app, geminiClient, geminiImageModel, botToken, botName } = deps;
+  return makeTools({
+    geminiClient,
+    geminiImageModel,
+    botName,
+    fetch,
+    async slackUploadImage({ buffer, prompt }) {
+      await app.client.files.uploadV2({
+        token: botToken,
+        channel_id: channel,
+        file: buffer,
+        filename: 'gemini-image.png',
+        title: prompt,
+        initial_comment: `Here's the image for: "${prompt}"`,
+        alt_text: `Image of: ${prompt}`,
+      });
+    },
+    async slackPostBlocks(payload) {
+      const args =
+        typeof payload === 'string' ? { channel, text: payload } : { channel, ...payload };
+      await app.client.chat.postMessage(args);
+    },
+  });
 }
 
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
@@ -134,7 +149,8 @@ export function registerHandlers(deps) {
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, convoStore });
+      const tools = buildToolsFor(deps, message.channel);
+      const responseText = await handleMessage(message, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {
@@ -185,15 +201,11 @@ export function registerHandlers(deps) {
       return;
     }
 
-    if (isImageRequest(message.text)) {
-      await say(IMAGE_REQUEST_GUIDANCE);
-      return;
-    }
-
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, convoStore });
+      const tools = buildToolsFor(deps, message.channel);
+      const responseText = await handleMessage(message, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {
