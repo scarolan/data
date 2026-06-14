@@ -51,6 +51,24 @@ async function postThinking(say, thinkingMessage, visibleText = thinkingMessage)
   }
 }
 
+// Build a Slack `say()` payload from a chat result. When the model surfaced a
+// thinking trace, render it as a small italicized context block above the
+// final reply so users can see Data "compute" in character.
+function buildReplyPayload({ text, thinking }) {
+  if (!thinking) return text;
+  const truncated = thinking.length > 1200 ? thinking.slice(0, 1200) + '…' : thinking;
+  return {
+    text,
+    blocks: [
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `:brain: _Thinking: ${truncated}_` }],
+      },
+      { type: 'section', text: { type: 'mrkdwn', text } },
+    ],
+  };
+}
+
 async function clearThinking(app, channel, ts) {
   if (!ts) return;
   try {
@@ -180,9 +198,9 @@ export function registerHandlers(deps) {
       thinking = await postThinking(say, thinkingMessage);
       const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
-      const responseText = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
-      await say(responseText);
+      await say(buildReplyPayload(result));
     } catch (error) {
       console.error(`Error in ${channelType} message processing:`, error);
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
@@ -238,9 +256,9 @@ export function registerHandlers(deps) {
       thinking = await postThinking(say, thinkingMessage);
       const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
-      const responseText = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
-      await say(responseText);
+      await say(buildReplyPayload(result));
     } catch (error) {
       console.error('Error in direct mention processing:', error);
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);

@@ -134,6 +134,40 @@ test('Ollama adapter translates assistant turns with tool_calls + tool-role resu
   assert.deepStrictEqual(wire[2], { role: 'tool', content: 'result-1', tool_name: 'do_thing' });
 });
 
+test('Ollama adapter passes think through and surfaces message.thinking', async () => {
+  const ollama = makeFakeOllama({
+    message: { role: 'assistant', content: 'Four.', thinking: 'computing 2+2' },
+  });
+  const chat = makeOllamaChat({ model: 'qwq', client: ollama, think: true });
+  const { text, thinking } = await chat.chat({
+    messages: [{ role: 'user', content: '2+2?' }],
+  });
+  assert.strictEqual(text, 'Four.');
+  assert.strictEqual(thinking, 'computing 2+2');
+  assert.strictEqual(ollama.calls[0].think, true);
+});
+
+test('Ollama adapter accepts think="high" and forwards it', async () => {
+  const ollama = makeFakeOllama(ollamaReply('ok'));
+  const chat = makeOllamaChat({ model: 'qwq', client: ollama, think: 'high' });
+  await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(ollama.calls[0].think, 'high');
+});
+
+test('Ollama adapter omits think param when not configured', async () => {
+  const ollama = makeFakeOllama(ollamaReply('ok'));
+  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
+  await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(ollama.calls[0].think, undefined);
+});
+
+test('Ollama adapter omits thinking from result when message lacks it', async () => {
+  const ollama = makeFakeOllama(ollamaReply('ok'));
+  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
+  const result = await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
+  assert.strictEqual(result.thinking, undefined);
+});
+
 test('Ollama adapter translates images on the user turn to native base64 strings', async () => {
   const ollama = makeFakeOllama(ollamaReply('I see a cat.'));
   const chat = makeOllamaChat({ model: 'llava', client: ollama });

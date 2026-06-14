@@ -52,7 +52,7 @@ test('handleMessage returns an apology for empty text without calling chat', asy
     { text: '', user: 'U1' },
     { chat, convoStore: makeFakeConvoStore() }
   );
-  assert.match(result, /cannot process an empty message/);
+  assert.match(result.text, /cannot process an empty message/);
   assert.strictEqual(chat.calls.length, 0);
 });
 
@@ -61,11 +61,11 @@ test('handleMessage persists per-user history across calls', async () => {
   const convoStore = makeFakeConvoStore();
 
   const first = await handleMessage({ text: 'hi', user: 'U1' }, { chat, convoStore });
-  assert.strictEqual(first, 'hi back');
+  assert.strictEqual(first.text, 'hi back');
   assert.deepStrictEqual(chat.calls[0].messages, [{ role: 'user', content: 'hi' }]);
 
   const second = await handleMessage({ text: 'still there?', user: 'U1' }, { chat, convoStore });
-  assert.strictEqual(second, 'hi back');
+  assert.strictEqual(second.text, 'hi back');
   assert.deepStrictEqual(chat.calls[1].messages, [
     { role: 'user', content: 'hi' },
     { role: 'assistant', content: 'hi back' },
@@ -125,7 +125,7 @@ test('handleMessage returns a friendly rephrase message on content/policy errors
     { text: 'hi', user: 'U1' },
     { chat, convoStore: makeFakeConvoStore() }
   );
-  assert.match(result, /rephrase your request/);
+  assert.match(result.text, /rephrase your request/);
 });
 
 test('handleMessage falls back to the generic apology on other errors', async () => {
@@ -134,7 +134,7 @@ test('handleMessage falls back to the generic apology on other errors', async ()
     { text: 'hi', user: 'U1' },
     { chat, convoStore: makeFakeConvoStore() }
   );
-  assert.match(result, /neural pathways/);
+  assert.match(result.text, /neural pathways/);
 });
 
 test('handleMessage does not persist history when the backend errors', async () => {
@@ -173,7 +173,7 @@ test('handleMessage executes a tool call and feeds the result back to the model'
     { chat, convoStore: makeFakeConvoStore(), tools }
   );
 
-  assert.strictEqual(reply, 'I echoed it for you.');
+  assert.strictEqual(reply.text, 'I echoed it for you.');
   assert.deepStrictEqual(toolCalls, ['hello']);
 
   // Second model call sees the assistant turn with tool_calls + the tool result.
@@ -233,7 +233,7 @@ test('handleMessage surfaces tool-execution errors as model-visible strings', as
     { text: 'try it', user: 'U1' },
     { chat, convoStore: makeFakeConvoStore(), tools }
   );
-  assert.strictEqual(reply, 'Sorry, that did not work.');
+  assert.strictEqual(reply.text, 'Sorry, that did not work.');
   const toolMsg = chat.calls[1].messages.find((m) => m.role === 'tool');
   assert.match(toolMsg.content, /kaboom/);
 });
@@ -252,6 +252,36 @@ test('handleMessage returns an unknown-tool error message when the model halluci
   assert.match(toolMsg.content, /unknown tool/);
 });
 
+// --- Thinking -------------------------------------------------------------
+
+test('handleMessage surfaces thinking from the backend, but does not persist it', async () => {
+  const chat = {
+    async chat() {
+      return { text: 'Four.', thinking: 'Computing 2+2 by recalling arithmetic facts.' };
+    },
+  };
+  const convoStore = makeFakeConvoStore();
+  const result = await handleMessage({ text: '2+2?', user: 'U1' }, { chat, convoStore });
+  assert.strictEqual(result.text, 'Four.');
+  assert.match(result.thinking, /Computing/);
+
+  // Persisted history has just user + assistant text — no thinking trace.
+  const stored = await convoStore.get('convo:U1');
+  assert.deepStrictEqual(stored, [
+    { role: 'user', content: '2+2?' },
+    { role: 'assistant', content: 'Four.' },
+  ]);
+});
+
+test('handleMessage omits thinking from the result when backend returns none', async () => {
+  const chat = makeFakeChat({ reply: 'hello' });
+  const result = await handleMessage(
+    { text: 'hi', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore() }
+  );
+  assert.strictEqual(result.thinking, undefined);
+});
+
 // --- Vision ---------------------------------------------------------------
 
 test('handleMessage attaches images to the user turn and strips them on persist', async () => {
@@ -264,7 +294,7 @@ test('handleMessage attaches images to the user turn and strips them on persist'
     { chat, convoStore }
   );
 
-  assert.strictEqual(reply, 'I see a cat.');
+  assert.strictEqual(reply.text, 'I see a cat.');
   // Image was on the wire turn.
   assert.deepStrictEqual(chat.calls[0].messages[0].images, images);
   // History stores only the text portion of the user turn.
@@ -280,7 +310,7 @@ test('handleMessage accepts images with empty text', async () => {
   const convoStore = makeFakeConvoStore();
   const images = [{ mimeType: 'image/png', data: 'YWJj' }];
   const reply = await handleMessage({ text: '', user: 'U1', images }, { chat, convoStore });
-  assert.strictEqual(reply, 'A cat.');
+  assert.strictEqual(reply.text, 'A cat.');
 });
 
 test('handleMessage still rejects truly empty (no text, no images) input', async () => {
@@ -289,7 +319,7 @@ test('handleMessage still rejects truly empty (no text, no images) input', async
     { text: '', user: 'U1' },
     { chat, convoStore: makeFakeConvoStore() }
   );
-  assert.match(reply, /cannot process an empty message/);
+  assert.match(reply.text, /cannot process an empty message/);
   assert.strictEqual(chat.calls.length, 0);
 });
 
