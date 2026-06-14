@@ -1,32 +1,19 @@
 ///////////////////////////////////////////////////////////////
-// A bolt.js Slack chatbot augmented with OpenAI ChatGPT
-// Requires a running Redis instance to persist the bot's memory
-//
-// Load environment variables from .env file (must be first)
-import 'dotenv/config';
-//
-// Make sure you set the required environment variables in .env:
-// SLACK_BOT_TOKEN - under the OAuth Permissions page on api.slack.com
-// SLACK_APP_TOKEN - under your app's Basic Information page on api.slack.com
-// SLACK_BOT_USER_NAME - must match the short name of your bot user
-// OPENAI_API_KEY - get from here: https://platform.openai.com/account/api-keys
-// BOT_PERSONALITY - (optional) customize the bot's character and behavior
-// THINKING_MESSAGE - (optional) customize the "thinking" message
-//
-// Note: The /image slash command uses an asynchronous approach to handle
-// Slack timeout limitations, generating the image in the background and
-// posting directly to the channel when complete.
+// A bolt.js Slack chatbot. Wires Bolt event handlers onto pure
+// helpers in lib/. Conversation goes through native Ollama or
+// Gemini SDKs; tool calls are dispatched inside lib/chat.js.
 ///////////////////////////////////////////////////////////////
 
+import 'dotenv/config';
 import { directMention } from '@slack/bolt';
 import fetch from 'node-fetch';
 
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
 import { handleMessage } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
+import { makeTools } from './lib/tools.js';
 import {
   ASIMOV_RULES,
-  IMAGE_REQUEST_GUIDANCE,
   RICKROLL_BLOCKS,
   TIKTOK_BLOCKS,
   buildDancePartyMessage,
@@ -35,7 +22,6 @@ import {
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
-  isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
@@ -47,45 +33,109 @@ export { generateImage, handleMessage };
 const GENERIC_ERROR_TEXT =
   'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
 
-// Post a "thinking" indicator. Returns the say() result so caller can later delete it.
-async function postThinking(say, thinkingMessage, visibleText = thinkingMessage) {
+const THINKING_REACTION = 'brain';
+
+// Add a :brain: reaction to the user's message to signal Data is processing.
+// Returns true if the reaction landed (so caller can remove it on reply).
+async function addThinkingReaction(app, channel, ts) {
+  if (!channel || !ts) return false;
   try {
-    return await say({
-      text: visibleText,
-      blocks: [
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: thinkingMessage }],
-        },
-      ],
-    });
+    await app.client.reactions.add({ channel, timestamp: ts, name: THINKING_REACTION });
+    return true;
   } catch (err) {
-    console.warn('Failed to post thinking message:', err && err.message ? err.message : err);
-    return null;
+    console.warn('Failed to add thinking reaction:', err && err.message ? err.message : err);
+    return false;
   }
 }
 
-async function clearThinking(app, channel, ts) {
-  if (!ts) return;
+// Build a Slack `say()` payload from a chat result. When the model surfaced a
+// thinking trace, render it as a small italicized context block above the
+// final reply so users can see Data "compute" in character.
+function buildReplyPayload({ text, thinking }) {
+  if (!thinking) return text;
+  const truncated = thinking.length > 1200 ? thinking.slice(0, 1200) + '…' : thinking;
+  return {
+    text,
+    blocks: [
+      {
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `:brain: _Thinking: ${truncated}_` }],
+      },
+      { type: 'section', text: { type: 'mrkdwn', text } },
+    ],
+  };
+}
+
+async function removeThinkingReaction(app, channel, ts) {
+  if (!channel || !ts) return;
   try {
-    await app.client.chat.delete({ channel, ts });
+    await app.client.reactions.remove({ channel, timestamp: ts, name: THINKING_REACTION });
   } catch (err) {
-    console.log('Error deleting thinking message:', err && err.message ? err.message : err);
+    console.log('Failed to remove thinking reaction:', err && err.message ? err.message : err);
   }
+}
+
+const VISION_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+// Pull any image attachments off a Slack message, fetch them with the bot
+// token, return `[{ mimeType, data: base64 }]` for the chat layer. Anything
+// non-image or that fails to fetch is silently skipped.
+async function extractMessageImages(message, botToken) {
+  if (!message.files?.length) return [];
+  const imageFiles = message.files.filter((f) => VISION_MIME_TYPES.includes(f.mimetype));
+  const out = [];
+  for (const file of imageFiles) {
+    try {
+      const res = await fetch(file.url_private, {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
+      if (!res.ok) {
+        console.warn(`Slack file fetch ${file.id}: HTTP ${res.status}`);
+        continue;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      out.push({ mimeType: file.mimetype, data: buf.toString('base64') });
+    } catch (err) {
+      console.warn(`Slack file fetch ${file.id} failed:`, err.message);
+    }
+  }
+  return out;
+}
+
+// Construct a tools registry bound to a specific Slack channel so tool side
+// effects (image upload, joke post, etc.) land in the right place. Cheap to
+// build per-message — the closures only capture a handful of values.
+function buildToolsFor(deps, channel, threadTs) {
+  const { app, geminiClient, geminiImageModel, botToken, botName } = deps;
+  return makeTools({
+    geminiClient,
+    geminiImageModel,
+    botName,
+    fetch,
+    async slackUploadImage({ buffer, prompt }) {
+      await app.client.files.uploadV2({
+        token: botToken,
+        channel_id: channel,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
+        file: buffer,
+        filename: 'gemini-image.png',
+        title: prompt,
+        initial_comment: `Here's the image for: "${prompt}"`,
+        alt_text: `Image of: ${prompt}`,
+      });
+    },
+    async slackPostBlocks(payload) {
+      const args =
+        typeof payload === 'string' ? { channel, text: payload } : { channel, ...payload };
+      if (threadTs) args.thread_ts = threadTs;
+      await app.client.chat.postMessage(args);
+    },
+  });
 }
 
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
 export function registerHandlers(deps) {
-  const {
-    app,
-    chat,
-    convoStore,
-    geminiClient,
-    geminiImageModel,
-    botName,
-    botToken,
-    thinkingMessage,
-  } = deps;
+  const { app, chat, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
 
   app.message(async ({ message, say, context }) => {
     if (!message) {
@@ -128,18 +178,21 @@ export function registerHandlers(deps) {
     const channelType = message.channel_type;
     if (channelType !== 'im' && channelType !== 'mpim') return;
 
-    if (!message.text || message.text.trim() === '') return;
+    const hasText = message.text && message.text.trim() !== '';
+    const hasFiles = !!message.files?.length;
+    if (!hasText && !hasFiles) return;
     if (message.edited || message.subtype) return;
 
-    let thinking = null;
+    const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
-      thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, convoStore });
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
-      await say(responseText);
+      const images = await extractMessageImages(message, botToken);
+      const tools = buildToolsFor(deps, message.channel);
+      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+      await say(buildReplyPayload(result));
     } catch (error) {
       console.error(`Error in ${channelType} message processing:`, error);
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(GENERIC_ERROR_TEXT);
     }
   });
@@ -147,14 +200,26 @@ export function registerHandlers(deps) {
   app.message(directMention(), async ({ message, say }) => {
     if (!message) return;
     if (message.subtype) return;
+    // Bail on bot-originated messages to prevent loops; thread replies from
+    // humans are allowed through so Data can hold a back-and-forth in-thread.
+    if (message.bot_profile || message.bot_id) return;
+
+    // Channel @-mentions reply in-thread: continue the existing thread if the
+    // mention came from one, otherwise start a new thread rooted at the
+    // mention itself. Keeps Data from flooding the channel.
+    const threadTs = message.thread_ts || message.ts;
+    const sayInThread = (payload) => {
+      const obj = typeof payload === 'string' ? { text: payload } : payload;
+      return say({ ...obj, thread_ts: threadTs });
+    };
 
     if (message.text && message.text.toLowerCase().includes('help')) {
-      await say(buildHelpText(botName));
+      await sayInThread(buildHelpText(botName));
       return;
     }
 
     if (message.text && message.text.toLowerCase().includes('the rules')) {
-      await say(ASIMOV_RULES);
+      await sayInThread(ASIMOV_RULES);
       return;
     }
 
@@ -162,44 +227,34 @@ export function registerHandlers(deps) {
       try {
         const joke = await fetchDadJoke(fetch);
         const { joke: jokeText, zinger } = formatDadJoke(joke);
-        await say(jokeText);
+        await sayInThread(jokeText);
         if (zinger) {
           await new Promise((resolve) => setTimeout(resolve, 10000));
-          await say(zinger);
+          await sayInThread(zinger);
         }
       } catch (error) {
         console.error(error);
-        await say(`Encountered an error :( ${error}`);
+        await sayInThread(`Encountered an error :( ${error}`);
       }
       return;
     }
 
-    if (!message.text || message.text.trim() === '') return;
-    if (
-      message.edited ||
-      message.thread_ts ||
-      message.parent_user_id ||
-      message.bot_profile ||
-      message.bot_id
-    ) {
-      return;
-    }
+    const hasText = message.text && message.text.trim() !== '';
+    const hasFiles = !!message.files?.length;
+    if (!hasText && !hasFiles) return;
+    if (message.edited) return;
 
-    if (isImageRequest(message.text)) {
-      await say(IMAGE_REQUEST_GUIDANCE);
-      return;
-    }
-
-    let thinking = null;
+    const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
-      thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, convoStore });
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
-      await say(responseText);
+      const images = await extractMessageImages(message, botToken);
+      const tools = buildToolsFor(deps, message.channel, threadTs);
+      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+      await sayInThread(buildReplyPayload(result));
     } catch (error) {
       console.error('Error in direct mention processing:', error);
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
-      await say(GENERIC_ERROR_TEXT);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+      await sayInThread(GENERIC_ERROR_TEXT);
     }
   });
 

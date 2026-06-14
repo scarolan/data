@@ -4,14 +4,12 @@ import assert from 'node:assert';
 import {
   ASIMOV_RULES,
   DANCE_PARTY_EMOJI,
-  IMAGE_REQUEST_GUIDANCE,
   buildDancePartyMessage,
   buildHelpText,
   fetchDadJoke,
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
-  isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
@@ -63,18 +61,6 @@ test('isTikTok and isRickroll match their trigger phrases', () => {
   assert.ok(isRickroll('rick roll'));
   assert.ok(isRickroll('Never gonna give you up'));
   assert.ok(!isRickroll('rocknroll'));
-});
-
-test('isImageRequest catches several phrasings', () => {
-  assert.ok(isImageRequest('can you create an image of a cat'));
-  assert.ok(isImageRequest('please draw me a picture'));
-  assert.ok(isImageRequest('generate an illustration of a sunset'));
-  assert.ok(!isImageRequest('what is an image'));
-  assert.ok(!isImageRequest(''));
-});
-
-test('IMAGE_REQUEST_GUIDANCE points at the /image slash command', () => {
-  assert.match(IMAGE_REQUEST_GUIDANCE, /\/image/);
 });
 
 test('buildHelpText interpolates the bot name and lists key commands', () => {

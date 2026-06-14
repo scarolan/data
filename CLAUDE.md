@@ -28,17 +28,19 @@ npm run format   # Format with Prettier
 ## Layout
 
 ```
-app.js                     # Bolt handler wiring + start() (~300 lines)
+app.js                     # Bolt handler wiring + start()
 lib/
   responses.js             # Pure trigger-word matchers, help text, dad joke, Asimov rules
-  chat.js                  # handleMessage — backend-agnostic, history in convoStore
+  chat.js                  # handleMessage — backend-agnostic, history in convoStore, tool dispatch loop
   chat-backends.js         # makeOllamaChat() / makeGeminiChat() adapter factories
+  tools.js                 # Tool registry: image gen, dad joke, asimov, help, dance, rickroll, tiktok
   image.js                 # generateImage via Gemini (client + model injected)
   deps.js                  # buildDeps() factory, validateRequiredEnv()
 test/
   responses.test.js        # Matcher + helper coverage
-  chat.test.js             # handleMessage + convoStore persistence
-  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation
+  chat.test.js             # handleMessage + convoStore persistence + tool dispatch
+  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation (incl. tools, vision, thinking)
+  tools.test.js            # Tool registry execution + side effects
   image.test.js            # generateImage with mocked Gemini
   app.test.js              # Import-safety smoke test
   package.test.js          # package.json sanity checks
@@ -56,8 +58,9 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 | Export | Source | Purpose |
 |--------|--------|---------|
-| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter, persist per-user history |
+| `handleMessage(msg, { chat, convoStore, tools? })` | `lib/chat.js` | Route Slack message through the chat adapter; runs the tool dispatch loop; returns `{ text, thinking? }` |
 | `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
+| `makeTools({ ... })` | `lib/tools.js` | Build a tool registry bound to a Slack channel for side effects |
 | `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
 | `start(deps)` | `app.js` | Wire signals + register handlers + `app.start()` |
 
@@ -92,10 +95,10 @@ Loaded from `.env` via dotenv (see `.env.example`).
 - `CHAT_BACKEND` — `ollama` (default) or `gemini`
 - `OLLAMA_HOST` — Ollama endpoint (default: `http://localhost:11434`)
 - `OLLAMA_MODEL` — Ollama chat model (default: `llama3.1`)
+- `OLLAMA_THINK` — surface model thinking traces: `true|low|medium|high` (requires a reasoning model — qwq, gpt-oss, deepseek-r1, etc.)
 - `GEMINI_CHAT_MODEL` — Gemini chat model (default: `gemini-3-flash-latest`)
 - `GEMINI_IMAGE_MODEL` — override the default image model (default: `gemini-3.1-flash-image`)
 - `BOT_PERSONALITY` — Custom system prompt
-- `THINKING_MESSAGE` — Custom processing indicator text
 - `REDIS_URL` — Redis connection (default: `redis://localhost:6379`)
 - `MEMORY_TTL_HOURS` — Conversation memory lifetime (default: 24)
 
@@ -113,6 +116,33 @@ Loaded from `.env` via dotenv (see `.env.example`).
 - **Google Gemini** (`@google/genai`) — Image generation (`gemini-3.1-flash-image`, "Nano Banana 2") and optional chat backend (`gemini-3-flash-latest`)
 - **icanhazdadjoke.com** — Dad jokes endpoint
 - **Redis** — Conversation history persistence
+
+## Tools
+
+Data has a small native tool registry (`lib/tools.js`) the LLM picks from per turn:
+
+| Tool | Effect |
+|------|--------|
+| `generate_image(prompt)` | Generates an image via Gemini and uploads it to the current channel |
+| `tell_dad_joke()` | Posts a random dad joke (with occasional zinger) |
+| `state_asimovs_laws()` | Posts Asimov's Laws |
+| `show_help()` | Posts the help text |
+| `start_dance_party()` | Posts the emoji rain |
+| `play_rickroll()` / `play_tiktok()` | Posts the corresponding link buttons |
+
+Tool dispatch happens inside `handleMessage`'s loop (capped at 5 iterations). Tool call traffic is ephemeral — only the final assistant text is persisted to convoStore.
+
+## Vision
+
+When an incoming message has image attachments, `app.js::extractMessageImages` fetches each via the Slack file URL with the bot token, base64-encodes them, and attaches as `images: [{ mimeType, data }]` on the canonical user turn. Adapters translate to Ollama's `message.images` (base64 strings) or Gemini's `inlineData` parts. Image bytes are not persisted to history.
+
+## Reactions UX
+
+While Data is thinking, the bot adds a `:brain:` reaction to the user's message (via `reactions.add`) and removes it before posting the reply. Requires `reactions:read` and `reactions:write` scopes — see `manifest.yaml`.
+
+## Thread-aware replies
+
+Channel @-mentions reply in-thread: if the mention is inside an existing thread, the reply continues that thread; otherwise a new thread is started rooted at the mention. Tool side effects (image uploads, joke posts) also land in-thread. DMs reply flat as before.
 
 ## Canned Responses
 
