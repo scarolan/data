@@ -21,7 +21,7 @@ import 'dotenv/config';
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
-const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
+const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation. Reply only with spoken dialogue. Do not include third-person narration, stage directions, or parenthetical descriptions of your actions, expressions, or movements.`;
 const personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
 
 // Get thinking message from environment variable or use default
@@ -127,18 +127,19 @@ const chatGptOptions = {
   },
 };
 
-// Add custom base URL if configured (for local LLMs like Llama)
+// Add custom base URL if configured (for local LLMs like Gemma)
 if (llmApiBaseUrl) {
   chatGptOptions.apiBaseUrl = llmApiBaseUrl;
 }
 
 const openai_api = new ChatGPTAPI(chatGptOptions);
 
-// Helper to strip Llama tokenizer artifacts from responses
-const llamaTokens = /<\|(?:eot_id|end_of_text|begin_of_text|start_header_id|end_header_id)\|>/g;
-function cleanLlamaResponse(text) {
+// Helper to strip local LLM tokenizer artifacts from responses
+const localLlmTokens =
+  /<\|(?:eot_id|end_of_text|begin_of_text|start_header_id|end_header_id|eos|bos|pad)\|>/g;
+function cleanLocalLlmResponse(text) {
   if (!llmApiBaseUrl || !text) return text;
-  return text.replace(llamaTokens, '').trim();
+  return text.replace(localLlmTokens, '').trim();
 }
 
 // OpenAI API client for generating images
@@ -239,7 +240,7 @@ async function handleMessage(message, _client = null, _channel = null) {
     userParentMessageIds.set(userId, response.id);
 
     //console.log(response.text);
-    return cleanLlamaResponse(response.text);
+    return cleanLocalLlmResponse(response.text);
   } catch (error) {
     console.error('Error in handleMessage:', error);
 
