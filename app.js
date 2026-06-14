@@ -60,6 +60,33 @@ async function clearThinking(app, channel, ts) {
   }
 }
 
+const VISION_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+// Pull any image attachments off a Slack message, fetch them with the bot
+// token, return `[{ mimeType, data: base64 }]` for the chat layer. Anything
+// non-image or that fails to fetch is silently skipped.
+async function extractMessageImages(message, botToken) {
+  if (!message.files?.length) return [];
+  const imageFiles = message.files.filter((f) => VISION_MIME_TYPES.includes(f.mimetype));
+  const out = [];
+  for (const file of imageFiles) {
+    try {
+      const res = await fetch(file.url_private, {
+        headers: { Authorization: `Bearer ${botToken}` },
+      });
+      if (!res.ok) {
+        console.warn(`Slack file fetch ${file.id}: HTTP ${res.status}`);
+        continue;
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      out.push({ mimeType: file.mimetype, data: buf.toString('base64') });
+    } catch (err) {
+      console.warn(`Slack file fetch ${file.id} failed:`, err.message);
+    }
+  }
+  return out;
+}
+
 // Construct a tools registry bound to a specific Slack channel so tool side
 // effects (image upload, joke post, etc.) land in the right place. Cheap to
 // build per-message — the closures only capture a handful of values.
@@ -143,14 +170,17 @@ export function registerHandlers(deps) {
     const channelType = message.channel_type;
     if (channelType !== 'im' && channelType !== 'mpim') return;
 
-    if (!message.text || message.text.trim() === '') return;
+    const hasText = message.text && message.text.trim() !== '';
+    const hasFiles = !!message.files?.length;
+    if (!hasText && !hasFiles) return;
     if (message.edited || message.subtype) return;
 
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
+      const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
-      const responseText = await handleMessage(message, { chat, convoStore, tools });
+      const responseText = await handleMessage({ ...message, images }, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {
@@ -190,7 +220,9 @@ export function registerHandlers(deps) {
       return;
     }
 
-    if (!message.text || message.text.trim() === '') return;
+    const hasText = message.text && message.text.trim() !== '';
+    const hasFiles = !!message.files?.length;
+    if (!hasText && !hasFiles) return;
     if (
       message.edited ||
       message.thread_ts ||
@@ -204,8 +236,9 @@ export function registerHandlers(deps) {
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
+      const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
-      const responseText = await handleMessage(message, { chat, convoStore, tools });
+      const responseText = await handleMessage({ ...message, images }, { chat, convoStore, tools });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {

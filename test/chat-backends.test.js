@@ -134,6 +134,28 @@ test('Ollama adapter translates assistant turns with tool_calls + tool-role resu
   assert.deepStrictEqual(wire[2], { role: 'tool', content: 'result-1', tool_name: 'do_thing' });
 });
 
+test('Ollama adapter translates images on the user turn to native base64 strings', async () => {
+  const ollama = makeFakeOllama(ollamaReply('I see a cat.'));
+  const chat = makeOllamaChat({ model: 'llava', client: ollama });
+  await chat.chat({
+    messages: [
+      {
+        role: 'user',
+        content: 'what is this?',
+        images: [
+          { mimeType: 'image/png', data: 'YWJj' },
+          { mimeType: 'image/jpeg', data: 'eHl6' },
+        ],
+      },
+    ],
+  });
+  assert.deepStrictEqual(ollama.calls[0].messages[0], {
+    role: 'user',
+    content: 'what is this?',
+    images: ['YWJj', 'eHl6'],
+  });
+});
+
 test('Ollama adapter omits tools when none provided', async () => {
   const ollama = makeFakeOllama(ollamaReply('ok'));
   const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
@@ -236,6 +258,42 @@ test('Gemini adapter translates tools to functionDeclarations and surfaces funct
         },
       ],
     },
+  ]);
+});
+
+test('Gemini adapter translates images on the user turn to inlineData parts', async () => {
+  const client = makeFakeGeminiClient({ text: 'I see a cat.' });
+  const chat = makeGeminiChat({ client, model: 'gemini-3-flash-latest' });
+  await chat.chat({
+    messages: [
+      {
+        role: 'user',
+        content: 'what is this?',
+        images: [
+          { mimeType: 'image/png', data: 'YWJj' },
+          { mimeType: 'image/jpeg', data: 'eHl6' },
+        ],
+      },
+    ],
+  });
+  assert.deepStrictEqual(client.calls[0].contents[0], {
+    role: 'user',
+    parts: [
+      { text: 'what is this?' },
+      { inlineData: { mimeType: 'image/png', data: 'YWJj' } },
+      { inlineData: { mimeType: 'image/jpeg', data: 'eHl6' } },
+    ],
+  });
+});
+
+test('Gemini adapter accepts an image-only user turn (no text part)', async () => {
+  const client = makeFakeGeminiClient({ text: 'A cat.' });
+  const chat = makeGeminiChat({ client, model: 'gemini-3-flash-latest' });
+  await chat.chat({
+    messages: [{ role: 'user', content: '', images: [{ mimeType: 'image/png', data: 'YWJj' }] }],
+  });
+  assert.deepStrictEqual(client.calls[0].contents[0].parts, [
+    { inlineData: { mimeType: 'image/png', data: 'YWJj' } },
   ]);
 });
 

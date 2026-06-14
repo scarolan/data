@@ -252,6 +252,47 @@ test('handleMessage returns an unknown-tool error message when the model halluci
   assert.match(toolMsg.content, /unknown tool/);
 });
 
+// --- Vision ---------------------------------------------------------------
+
+test('handleMessage attaches images to the user turn and strips them on persist', async () => {
+  const chat = makeFakeChat({ reply: 'I see a cat.' });
+  const convoStore = makeFakeConvoStore();
+  const images = [{ mimeType: 'image/png', data: 'YWJj' }];
+
+  const reply = await handleMessage(
+    { text: 'what is this?', user: 'U1', images },
+    { chat, convoStore }
+  );
+
+  assert.strictEqual(reply, 'I see a cat.');
+  // Image was on the wire turn.
+  assert.deepStrictEqual(chat.calls[0].messages[0].images, images);
+  // History stores only the text portion of the user turn.
+  const stored = await convoStore.get('convo:U1');
+  assert.deepStrictEqual(stored, [
+    { role: 'user', content: 'what is this?' },
+    { role: 'assistant', content: 'I see a cat.' },
+  ]);
+});
+
+test('handleMessage accepts images with empty text', async () => {
+  const chat = makeFakeChat({ reply: 'A cat.' });
+  const convoStore = makeFakeConvoStore();
+  const images = [{ mimeType: 'image/png', data: 'YWJj' }];
+  const reply = await handleMessage({ text: '', user: 'U1', images }, { chat, convoStore });
+  assert.strictEqual(reply, 'A cat.');
+});
+
+test('handleMessage still rejects truly empty (no text, no images) input', async () => {
+  const chat = makeFakeChat();
+  const reply = await handleMessage(
+    { text: '', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore() }
+  );
+  assert.match(reply, /cannot process an empty message/);
+  assert.strictEqual(chat.calls.length, 0);
+});
+
 test('handleMessage handles multiple tool calls in one turn', async () => {
   const executed = [];
   const tools = [
