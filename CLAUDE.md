@@ -35,7 +35,7 @@ npm run format   # Format with Prettier
 
 1. **General messages** (`app.message()`) - DMs and channel messages
 2. **Direct mentions** (`app.message(directMention())`) - `@Data` mentions
-3. **Slash commands** (`app.command('/dalle')`) - Image generation
+3. **Slash commands** (`app.command('/image')`) - Image generation
 
 ## Environment Variables
 

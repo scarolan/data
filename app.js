@@ -15,7 +15,7 @@ import 'dotenv/config';
 // THINKING_MESSAGE - (optional) customize the "thinking" message shown while processing
 //                   if not set, a default Star Trek Data themed message is used
 //
-// Note: The /dalle slash command uses an asynchronous approach to handle
+// Note: The /image slash command uses an asynchronous approach to handle
 // Slack timeout limitations, generating the image in the background and
 // posting directly to the channel when complete.
 ///////////////////////////////////////////////////////////////
@@ -207,13 +207,13 @@ async function handleMessage(message, _client = null, _channel = null) {
       return 'I apologize, but I cannot process an empty message. How may I assist you?';
     }
 
-    // If the user asks about creating images, guide them to the /dalle command
+    // If the user asks about creating images, guide them to the /image command
     if (
       message.text.match(
         /(?:can you |could you |please |)(?:create|generate|make|draw).+(?:image|picture|drawing|illustration)/i
       )
     ) {
-      return `I'd be happy to assist with image generation. Please use the /dalle slash command followed by your prompt. For example: \`/dalle a sunset over mountains\``;
+      return `I'd be happy to assist with image generation. Please use the /image slash command followed by your prompt. For example: \`/image a sunset over mountains\``;
     }
 
     // Process the message with OpenAI
@@ -585,7 +585,7 @@ async function clearThinking(channel, ts) {
         '',
         '# Slash commands:',
         '/askgpt <question> - Ask ChatGPT and get an ephemeral reply',
-        '/dalle <prompt>    - Generate an image with Gemini',
+        '/image <prompt>    - Generate an image with Gemini',
         '',
         `# Address the bot directly with @${process.env.SLACK_BOT_USER_NAME} syntax:`,
         `@${process.env.SLACK_BOT_USER_NAME} the rules - Explains Asimov's laws of robotics`,
@@ -696,23 +696,23 @@ async function clearThinking(channel, ts) {
     }
   });
 
-  // Slash command to generate an image with Gemini (Nano Banana)
-  app.command('/dalle', async ({ command, ack, respond, client, context }) => {
-    console.log('DALLE COMMAND RECEIVED:', JSON.stringify(command, null, 2));
+  // Slash command to generate an image with Gemini (Nano Banana 2)
+  app.command('/image', async ({ command, ack, respond, client, context }) => {
+    console.log('IMAGE COMMAND RECEIVED:', JSON.stringify(command, null, 2));
     console.log('Handler context:', JSON.stringify(context, null, 2));
     console.log('Command channel:', command.channel_id);
     console.log('Command user:', command.user_id);
 
     try {
       // Acknowledge the command immediately - CRITICAL for Slack timeouts
-      console.log('Acknowledging DALLE command...');
+      console.log('Acknowledging /image command...');
       await ack();
-      console.log('DALLE command acknowledged successfully');
+      console.log('/image command acknowledged successfully');
 
       if (!command.text || command.text.trim() === '') {
         console.log('Empty prompt provided, sending error response');
         await respond({
-          text: 'I need a description to generate an image. Please provide a prompt after the /dalle command.',
+          text: 'I need a description to generate an image. Please provide a prompt after the /image command.',
           response_type: 'ephemeral',
         });
         return;
@@ -905,7 +905,7 @@ async function clearThinking(channel, ts) {
         }
       }, 100); // Short delay to ensure the acknowledgment completes first
     } catch (error) {
-      console.error('Error in initial /dalle command handling:', error);
+      console.error('Error in initial /image command handling:', error);
 
       // Only respond if we haven't acknowledged yet
       try {
