@@ -18,30 +18,16 @@ function makeFakeConvoStore(initial = {}) {
   };
 }
 
-function makeFakeChat({ reply = 'pong', shouldThrow = null } = {}) {
+function makeFakeChat({ reply = 'pong', thinking = null, shouldThrow = null } = {}) {
   const calls = [];
   return {
     calls,
     async chat({ messages }) {
       calls.push({ messages });
       if (shouldThrow) throw shouldThrow;
-      return { text: reply };
-    },
-  };
-}
-
-// A chat fake that walks through a predetermined sequence of responses
-// (each call consumes one). Lets tests script multi-turn tool dispatch.
-function makeScriptedChat(responses) {
-  const calls = [];
-  let i = 0;
-  return {
-    calls,
-    async chat({ messages, tools }) {
-      calls.push({ messages, tools });
-      const next = responses[Math.min(i, responses.length - 1)];
-      i++;
-      return next;
+      const out = { text: reply };
+      if (thinking) out.thinking = thinking;
+      return out;
     },
   };
 }
@@ -148,124 +134,15 @@ test('handleMessage does not persist history when the backend errors', async () 
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
 });
 
-// --- Tool dispatch ---------------------------------------------------------
-
-test('handleMessage executes a tool call and feeds the result back to the model', async () => {
-  const toolCalls = [];
-  const tools = [
-    {
-      name: 'echo',
-      description: 'returns its arg',
-      parameters: { type: 'object', properties: { x: { type: 'string' } }, required: ['x'] },
-      async execute({ x }) {
-        toolCalls.push(x);
-        return `echoed: ${x}`;
-      },
-    },
-  ];
-  const chat = makeScriptedChat([
-    { text: '', toolCalls: [{ name: 'echo', args: { x: 'hello' } }] },
-    { text: 'I echoed it for you.' },
-  ]);
-
-  const reply = await handleMessage(
-    { text: 'echo hello', user: 'U1' },
-    { chat, convoStore: makeFakeConvoStore(), tools }
-  );
-
-  assert.strictEqual(reply.text, 'I echoed it for you.');
-  assert.deepStrictEqual(toolCalls, ['hello']);
-
-  // Second model call sees the assistant turn with tool_calls + the tool result.
-  const second = chat.calls[1].messages;
-  assert.strictEqual(second[1].role, 'assistant');
-  assert.deepStrictEqual(second[1].toolCalls, [{ name: 'echo', args: { x: 'hello' } }]);
-  assert.strictEqual(second[2].role, 'tool');
-  assert.strictEqual(second[2].toolName, 'echo');
-  assert.strictEqual(second[2].content, 'echoed: hello');
-});
-
-test('handleMessage persists only the final assistant text — tool traffic is ephemeral', async () => {
-  const tools = [
-    {
-      name: 'noop',
-      description: 'does nothing',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
-        return 'ok';
-      },
-    },
-  ];
-  const chat = makeScriptedChat([
-    { text: '', toolCalls: [{ name: 'noop', args: {} }] },
-    { text: 'Final answer.' },
-  ]);
-  const convoStore = makeFakeConvoStore();
-
-  await handleMessage({ text: 'go', user: 'U1' }, { chat, convoStore, tools });
-
-  const stored = await convoStore.get('convo:U1');
-  // Only user + final assistant — no tool round-trip in persistent history.
-  assert.strictEqual(stored.length, 2);
-  assert.deepStrictEqual(stored, [
-    { role: 'user', content: 'go' },
-    { role: 'assistant', content: 'Final answer.' },
-  ]);
-});
-
-test('handleMessage surfaces tool-execution errors as model-visible strings', async () => {
-  const tools = [
-    {
-      name: 'boom',
-      description: '',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
-        throw new Error('kaboom');
-      },
-    },
-  ];
-  const chat = makeScriptedChat([
-    { text: '', toolCalls: [{ name: 'boom', args: {} }] },
-    { text: 'Sorry, that did not work.' },
-  ]);
-
-  const reply = await handleMessage(
-    { text: 'try it', user: 'U1' },
-    { chat, convoStore: makeFakeConvoStore(), tools }
-  );
-  assert.strictEqual(reply.text, 'Sorry, that did not work.');
-  const toolMsg = chat.calls[1].messages.find((m) => m.role === 'tool');
-  assert.match(toolMsg.content, /kaboom/);
-});
-
-test('handleMessage returns an unknown-tool error message when the model hallucinates a tool', async () => {
-  const chat = makeScriptedChat([
-    { text: '', toolCalls: [{ name: 'nonexistent', args: {} }] },
-    { text: 'Pretend that worked.' },
-  ]);
-
-  await handleMessage(
-    { text: 'go', user: 'U1' },
-    { chat, convoStore: makeFakeConvoStore(), tools: [] }
-  );
-  const toolMsg = chat.calls[1].messages.find((m) => m.role === 'tool');
-  assert.match(toolMsg.content, /unknown tool/);
-});
-
 // --- Thinking -------------------------------------------------------------
 
 test('handleMessage surfaces thinking from the backend, but does not persist it', async () => {
-  const chat = {
-    async chat() {
-      return { text: 'Four.', thinking: 'Computing 2+2 by recalling arithmetic facts.' };
-    },
-  };
+  const chat = makeFakeChat({ reply: 'Four.', thinking: 'Computing 2+2.' });
   const convoStore = makeFakeConvoStore();
   const result = await handleMessage({ text: '2+2?', user: 'U1' }, { chat, convoStore });
   assert.strictEqual(result.text, 'Four.');
   assert.match(result.thinking, /Computing/);
 
-  // Persisted history has just user + assistant text — no thinking trace.
   const stored = await convoStore.get('convo:U1');
   assert.deepStrictEqual(stored, [
     { role: 'user', content: '2+2?' },
@@ -295,9 +172,7 @@ test('handleMessage attaches images to the user turn and strips them on persist'
   );
 
   assert.strictEqual(reply.text, 'I see a cat.');
-  // Image was on the wire turn.
   assert.deepStrictEqual(chat.calls[0].messages[0].images, images);
-  // History stores only the text portion of the user turn.
   const stored = await convoStore.get('convo:U1');
   assert.deepStrictEqual(stored, [
     { role: 'user', content: 'what is this?' },
@@ -321,44 +196,4 @@ test('handleMessage still rejects truly empty (no text, no images) input', async
   );
   assert.match(reply.text, /cannot process an empty message/);
   assert.strictEqual(chat.calls.length, 0);
-});
-
-test('handleMessage handles multiple tool calls in one turn', async () => {
-  const executed = [];
-  const tools = [
-    {
-      name: 'a',
-      description: '',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
-        executed.push('a');
-        return 'result-a';
-      },
-    },
-    {
-      name: 'b',
-      description: '',
-      parameters: { type: 'object', properties: {} },
-      async execute() {
-        executed.push('b');
-        return 'result-b';
-      },
-    },
-  ];
-  const chat = makeScriptedChat([
-    {
-      text: '',
-      toolCalls: [
-        { name: 'a', args: {} },
-        { name: 'b', args: {} },
-      ],
-    },
-    { text: 'Both done.' },
-  ]);
-
-  await handleMessage(
-    { text: 'go', user: 'U1' },
-    { chat, convoStore: makeFakeConvoStore(), tools }
-  );
-  assert.deepStrictEqual(executed, ['a', 'b']);
 });

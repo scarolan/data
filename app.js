@@ -11,9 +11,9 @@ import fetch from 'node-fetch';
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
 import { handleMessage } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
-import { makeTools } from './lib/tools.js';
 import {
   ASIMOV_RULES,
+  IMAGE_REQUEST_GUIDANCE,
   RICKROLL_BLOCKS,
   TIKTOK_BLOCKS,
   buildDancePartyMessage,
@@ -22,6 +22,7 @@ import {
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
+  isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
@@ -103,37 +104,6 @@ async function extractMessageImages(message, botToken) {
   return out;
 }
 
-// Construct a tools registry bound to a specific Slack channel so tool side
-// effects (image upload, joke post, etc.) land in the right place. Cheap to
-// build per-message — the closures only capture a handful of values.
-function buildToolsFor(deps, channel, threadTs) {
-  const { app, geminiClient, geminiImageModel, botToken, botName } = deps;
-  return makeTools({
-    geminiClient,
-    geminiImageModel,
-    botName,
-    fetch,
-    async slackUploadImage({ buffer, prompt }) {
-      await app.client.files.uploadV2({
-        token: botToken,
-        channel_id: channel,
-        ...(threadTs ? { thread_ts: threadTs } : {}),
-        file: buffer,
-        filename: 'gemini-image.png',
-        title: prompt,
-        initial_comment: `Here's the image for: "${prompt}"`,
-        alt_text: `Image of: ${prompt}`,
-      });
-    },
-    async slackPostBlocks(payload) {
-      const args =
-        typeof payload === 'string' ? { channel, text: payload } : { channel, ...payload };
-      if (threadTs) args.thread_ts = threadTs;
-      await app.client.chat.postMessage(args);
-    },
-  });
-}
-
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
 export function registerHandlers(deps) {
   const { app, chat, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
@@ -187,11 +157,15 @@ export function registerHandlers(deps) {
     if (!hasText && !hasFiles) return;
     if (message.edited) return;
 
+    if (isImageRequest(message.text)) {
+      await say(IMAGE_REQUEST_GUIDANCE);
+      return;
+    }
+
     const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
       const images = await extractMessageImages(message, botToken);
-      const tools = buildToolsFor(deps, message.channel);
-      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      const result = await handleMessage({ ...message, images }, { chat, convoStore });
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(buildReplyPayload(result));
     } catch (error) {
@@ -251,11 +225,15 @@ export function registerHandlers(deps) {
     if (!hasText && !hasFiles) return;
     if (message.edited) return;
 
+    if (isImageRequest(message.text)) {
+      await sayInThread(IMAGE_REQUEST_GUIDANCE);
+      return;
+    }
+
     const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
       const images = await extractMessageImages(message, botToken);
-      const tools = buildToolsFor(deps, message.channel, threadTs);
-      const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
+      const result = await handleMessage({ ...message, images }, { chat, convoStore });
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await sayInThread(buildReplyPayload(result));
     } catch (error) {

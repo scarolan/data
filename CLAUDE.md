@@ -31,16 +31,14 @@ npm run format   # Format with Prettier
 app.js                     # Bolt handler wiring + start()
 lib/
   responses.js             # Pure trigger-word matchers, help text, dad joke, Asimov rules
-  chat.js                  # handleMessage — backend-agnostic, history in convoStore, tool dispatch loop
+  chat.js                  # handleMessage — backend-agnostic, history in convoStore
   chat-backends.js         # makeOllamaChat() / makeGeminiChat() adapter factories
-  tools.js                 # Tool registry: image gen, dad joke, asimov, help, dance, rickroll, tiktok
   image.js                 # generateImage via Gemini (client + model injected)
   deps.js                  # buildDeps() factory, validateRequiredEnv()
 test/
   responses.test.js        # Matcher + helper coverage
-  chat.test.js             # handleMessage + convoStore persistence + tool dispatch
-  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation (incl. tools, vision, thinking)
-  tools.test.js            # Tool registry execution + side effects
+  chat.test.js             # handleMessage + convoStore persistence
+  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation (incl. vision, thinking)
   image.test.js            # generateImage with mocked Gemini
   app.test.js              # Import-safety smoke test
   package.test.js          # package.json sanity checks
@@ -58,9 +56,8 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 | Export | Source | Purpose |
 |--------|--------|---------|
-| `handleMessage(msg, { chat, convoStore, tools? })` | `lib/chat.js` | Route Slack message through the chat adapter; runs the tool dispatch loop; returns `{ text, thinking? }` |
+| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter; returns `{ text, thinking? }` |
 | `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
-| `makeTools({ ... })` | `lib/tools.js` | Build a tool registry bound to a Slack channel for side effects |
 | `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
 | `start(deps)` | `app.js` | Wire signals + register handlers + `app.start()` |
 
@@ -117,21 +114,6 @@ Loaded from `.env` via dotenv (see `.env.example`).
 - **icanhazdadjoke.com** — Dad jokes endpoint
 - **Redis** — Conversation history persistence
 
-## Tools
-
-Data has a small native tool registry (`lib/tools.js`) the LLM picks from per turn:
-
-| Tool | Effect |
-|------|--------|
-| `generate_image(prompt)` | Generates an image via Gemini and uploads it to the current channel |
-| `tell_dad_joke()` | Posts a random dad joke (with occasional zinger) |
-| `state_asimovs_laws()` | Posts Asimov's Laws |
-| `show_help()` | Posts the help text |
-| `start_dance_party()` | Posts the emoji rain |
-| `play_rickroll()` / `play_tiktok()` | Posts the corresponding link buttons |
-
-Tool dispatch happens inside `handleMessage`'s loop (capped at 5 iterations). Tool call traffic is ephemeral — only the final assistant text is persisted to convoStore.
-
 ## Vision
 
 When an incoming message has image attachments, `app.js::extractMessageImages` fetches each via the Slack file URL with the bot token, base64-encodes them, and attaches as `images: [{ mimeType, data }]` on the canonical user turn. Adapters translate to Ollama's `message.images` (base64 strings) or Gemini's `inlineData` parts. Image bytes are not persisted to history.
@@ -169,7 +151,9 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 
 **Modifying bot personality:** Set `BOT_PERSONALITY` env var, or edit the default in `buildDeps()` in `lib/deps.js`. Personality is bound at adapter construction; restart to pick up changes.
 
-**Adding a new chat backend:** Add a `make<Backend>Chat(...)` factory in `lib/chat-backends.js` that returns `{ async chat({ messages }) → { text } }`. Wire backend selection in `buildDeps()`. Add tests in `test/chat-backends.test.js` that assert the wire-format translation.
+**Adding a new chat backend:** Add a `make<Backend>Chat(...)` factory in `lib/chat-backends.js` that returns `{ async chat({ messages }) → { text, thinking? } }`. Wire backend selection in `buildDeps()`. Add tests in `test/chat-backends.test.js` that assert the wire-format translation.
+
+**Note: tool calling is intentionally not part of the architecture.** It was experimented with (see git history around PR #30 and the revert that followed) and removed: the gemma family — Data's preferred backend for its strong vision — emits tool calls as inline text rather than Ollama's structured `tool_calls` field, and most of the original tool registry just duplicated regex matchers that already worked. Image generation is the `/image` slash command (Data also nudges users toward it when they ask for an image in chat via `isImageRequest` + `IMAGE_REQUEST_GUIDANCE`).
 
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 

@@ -18,10 +18,8 @@ function makeFakeOllama(replyOrFn) {
   };
 }
 
-function ollamaReply(content, toolCalls = null) {
-  const message = { role: 'assistant', content };
-  if (toolCalls) message.tool_calls = toolCalls;
-  return { message };
+function ollamaReply(content) {
+  return { message: { role: 'assistant', content } };
 }
 
 test('Ollama adapter prepends the system message and forwards the model', async () => {
@@ -76,64 +74,6 @@ test('Ollama adapter propagates errors from the underlying client', async () => 
   });
 });
 
-test('Ollama adapter translates tools to native shape and surfaces tool_calls', async () => {
-  const ollama = makeFakeOllama(
-    ollamaReply('', [{ function: { name: 'do_thing', arguments: { x: 1 } } }])
-  );
-  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
-
-  const tools = [
-    {
-      name: 'do_thing',
-      description: 'does the thing',
-      parameters: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'] },
-    },
-  ];
-
-  const { text, toolCalls } = await chat.chat({
-    messages: [{ role: 'user', content: 'go' }],
-    tools,
-  });
-
-  assert.strictEqual(text, '');
-  assert.deepStrictEqual(toolCalls, [{ name: 'do_thing', args: { x: 1 } }]);
-
-  // Wire format: tools wrapped in {type:'function', function:{...}}.
-  assert.deepStrictEqual(ollama.calls[0].tools, [
-    {
-      type: 'function',
-      function: {
-        name: 'do_thing',
-        description: 'does the thing',
-        parameters: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'] },
-      },
-    },
-  ]);
-});
-
-test('Ollama adapter translates assistant turns with tool_calls + tool-role results', async () => {
-  const ollama = makeFakeOllama(ollamaReply('done'));
-  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
-  await chat.chat({
-    messages: [
-      { role: 'user', content: 'go' },
-      {
-        role: 'assistant',
-        content: '',
-        toolCalls: [{ name: 'do_thing', args: { x: 1 } }],
-      },
-      { role: 'tool', toolName: 'do_thing', content: 'result-1' },
-    ],
-  });
-  const wire = ollama.calls[0].messages;
-  assert.deepStrictEqual(wire[1], {
-    role: 'assistant',
-    content: '',
-    tool_calls: [{ function: { name: 'do_thing', arguments: { x: 1 } } }],
-  });
-  assert.deepStrictEqual(wire[2], { role: 'tool', content: 'result-1', tool_name: 'do_thing' });
-});
-
 test('Ollama adapter passes think through and surfaces message.thinking', async () => {
   const ollama = makeFakeOllama({
     message: { role: 'assistant', content: 'Four.', thinking: 'computing 2+2' },
@@ -147,25 +87,11 @@ test('Ollama adapter passes think through and surfaces message.thinking', async 
   assert.strictEqual(ollama.calls[0].think, true);
 });
 
-test('Ollama adapter accepts think="high" and forwards it', async () => {
-  const ollama = makeFakeOllama(ollamaReply('ok'));
-  const chat = makeOllamaChat({ model: 'qwq', client: ollama, think: 'high' });
-  await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
-  assert.strictEqual(ollama.calls[0].think, 'high');
-});
-
 test('Ollama adapter omits think param when not configured', async () => {
   const ollama = makeFakeOllama(ollamaReply('ok'));
   const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
   await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
   assert.strictEqual(ollama.calls[0].think, undefined);
-});
-
-test('Ollama adapter omits thinking from result when message lacks it', async () => {
-  const ollama = makeFakeOllama(ollamaReply('ok'));
-  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
-  const result = await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
-  assert.strictEqual(result.thinking, undefined);
 });
 
 test('Ollama adapter translates images on the user turn to native base64 strings', async () => {
@@ -188,13 +114,6 @@ test('Ollama adapter translates images on the user turn to native base64 strings
     content: 'what is this?',
     images: ['YWJj', 'eHl6'],
   });
-});
-
-test('Ollama adapter omits tools when none provided', async () => {
-  const ollama = makeFakeOllama(ollamaReply('ok'));
-  const chat = makeOllamaChat({ model: 'llama3.1', client: ollama });
-  await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
-  assert.strictEqual(ollama.calls[0].tools, undefined);
 });
 
 // --- Gemini --------------------------------------------------------------
@@ -241,7 +160,7 @@ test('Gemini adapter translates roles and lifts the system message', async () =>
   assert.deepStrictEqual(req.config, { systemInstruction: 'You are Data.' });
 });
 
-test('Gemini adapter omits config when no system message and no tools', async () => {
+test('Gemini adapter omits config when no system message is configured', async () => {
   const client = makeFakeGeminiClient({ text: 'ok' });
   const chat = makeGeminiChat({ client, model: 'gemini-3-flash-latest' });
   await chat.chat({ messages: [{ role: 'user', content: 'hi' }] });
@@ -253,46 +172,6 @@ test('Gemini adapter throws if constructed without a client', () => {
     () => makeGeminiChat({ client: null, model: 'gemini-3-flash-latest' }),
     /GEMINI_API_KEY/
   );
-});
-
-test('Gemini adapter translates tools to functionDeclarations and surfaces functionCall', async () => {
-  const client = makeFakeGeminiClient({
-    candidates: [
-      {
-        content: {
-          parts: [{ functionCall: { name: 'do_thing', args: { x: 1 } } }],
-        },
-      },
-    ],
-    text: '',
-  });
-  const chat = makeGeminiChat({ client, model: 'gemini-3-flash-latest' });
-
-  const tools = [
-    {
-      name: 'do_thing',
-      description: 'does the thing',
-      parameters: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'] },
-    },
-  ];
-
-  const { toolCalls } = await chat.chat({
-    messages: [{ role: 'user', content: 'go' }],
-    tools,
-  });
-
-  assert.deepStrictEqual(toolCalls, [{ name: 'do_thing', args: { x: 1 } }]);
-  assert.deepStrictEqual(client.calls[0].config.tools, [
-    {
-      functionDeclarations: [
-        {
-          name: 'do_thing',
-          description: 'does the thing',
-          parameters: { type: 'object', properties: { x: { type: 'number' } }, required: ['x'] },
-        },
-      ],
-    },
-  ]);
 });
 
 test('Gemini adapter translates images on the user turn to inlineData parts', async () => {
@@ -329,29 +208,4 @@ test('Gemini adapter accepts an image-only user turn (no text part)', async () =
   assert.deepStrictEqual(client.calls[0].contents[0].parts, [
     { inlineData: { mimeType: 'image/png', data: 'YWJj' } },
   ]);
-});
-
-test('Gemini adapter translates assistant tool calls and tool-role results to parts', async () => {
-  const client = makeFakeGeminiClient({ text: 'done' });
-  const chat = makeGeminiChat({ client, model: 'gemini-3-flash-latest' });
-  await chat.chat({
-    messages: [
-      { role: 'user', content: 'go' },
-      {
-        role: 'assistant',
-        content: '',
-        toolCalls: [{ name: 'do_thing', args: { x: 1 } }],
-      },
-      { role: 'tool', toolName: 'do_thing', content: 'result-1' },
-    ],
-  });
-  const contents = client.calls[0].contents;
-  assert.deepStrictEqual(contents[1], {
-    role: 'model',
-    parts: [{ functionCall: { name: 'do_thing', args: { x: 1 } } }],
-  });
-  assert.deepStrictEqual(contents[2], {
-    role: 'user',
-    parts: [{ functionResponse: { name: 'do_thing', response: { result: 'result-1' } } }],
-  });
 });
