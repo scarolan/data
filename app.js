@@ -204,7 +204,7 @@ export function registerHandlers(deps) {
       return;
     }
 
-    if (message.text && message.text.toLowerCase().includes('dad joke')) {
+    if (message.text && /\bdad\s*joke\b/i.test(message.text)) {
       try {
         const joke = await fetchDadJoke(fetch);
         const { joke: jokeText, zinger } = formatDadJoke(joke);
