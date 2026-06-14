@@ -21,7 +21,7 @@ import 'dotenv/config';
 ///////////////////////////////////////////////////////////////
 
 // Get bot personality from environment variable or use default
-const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation.`;
+const defaultPersonality = `You are a Soong type Android named ${process.env.SLACK_BOT_USER_NAME}. You are a member of the crew of the USS Enterprise. You are a member of the science division. You respond to all inquiries in character as if you were Lieutenant Commander Data from Star Trek: The Next Generation. Reply only with spoken dialogue. Do not include third-person narration, stage directions, or parenthetical descriptions of your actions, expressions, or movements.`;
 const personalityPrompt = process.env.BOT_PERSONALITY || defaultPersonality;
 
 // Get thinking message from environment variable or use default
@@ -30,7 +30,11 @@ const thinkingMessage = process.env.THINKING_MESSAGE || defaultThinkingMessage;
 
 // Validate required environment variables early to fail fast
 function validateRequiredEnv() {
-  const required = ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_BOT_USER_NAME', 'OPENAI_API_KEY'];
+  // OPENAI_API_KEY is only required if not using a local LLM
+  const required = ['SLACK_BOT_TOKEN', 'SLACK_APP_TOKEN', 'SLACK_BOT_USER_NAME'];
+  if (!process.env.LLM_API_BASE_URL) {
+    required.push('OPENAI_API_KEY');
+  }
   const missing = required.filter((k) => !process.env[k]);
   if (missing.length) {
     console.error('Missing required environment variables:', missing.join(', '));
@@ -102,15 +106,41 @@ console.log(
   `Keyv/Redis configured: REDIS_URL=${redisUrl}, MEMORY_TTL_HOURS=${memoryTtlHours}, MEMORY_MAX_KEYS=${memoryMaxKeys}`
 );
 
+// LLM configuration - supports local models via OpenAI-compatible API
+const llmApiBaseUrl = process.env.LLM_API_BASE_URL; // e.g., http://kepler.local:8080/v1
+const llmModel = process.env.LLM_MODEL || 'gpt-4o';
+const llmApiKey = process.env.OPENAI_API_KEY || 'not-needed'; // Local models often don't need a key
+
+if (llmApiBaseUrl) {
+  console.log(`Using custom LLM endpoint: ${llmApiBaseUrl} with model: ${llmModel}`);
+} else {
+  console.log(`Using OpenAI API with model: ${llmModel}`);
+}
+
 // Create a new instance of the ChatGPTAPI client
-const openai_api = new ChatGPTAPI({
-  apiKey: process.env.OPENAI_API_KEY,
+const chatGptOptions = {
+  apiKey: llmApiKey,
   messageStore,
   systemMessage: personalityPrompt,
   completionParams: {
-    model: 'gpt-4o',
+    model: llmModel,
   },
-});
+};
+
+// Add custom base URL if configured (for local LLMs like Gemma)
+if (llmApiBaseUrl) {
+  chatGptOptions.apiBaseUrl = llmApiBaseUrl;
+}
+
+const openai_api = new ChatGPTAPI(chatGptOptions);
+
+// Helper to strip local LLM tokenizer artifacts from responses
+const localLlmTokens =
+  /<\|(?:eot_id|end_of_text|begin_of_text|start_header_id|end_header_id|eos|bos|pad)\|>/g;
+function cleanLocalLlmResponse(text) {
+  if (!llmApiBaseUrl || !text) return text;
+  return text.replace(localLlmTokens, '').trim();
+}
 
 // OpenAI API client for generating images
 const openaiClient = new OpenAI({
@@ -210,7 +240,7 @@ async function handleMessage(message, _client = null, _channel = null) {
     userParentMessageIds.set(userId, response.id);
 
     //console.log(response.text);
-    return response.text;
+    return cleanLocalLlmResponse(response.text);
   } catch (error) {
     console.error('Error in handleMessage:', error);
 
