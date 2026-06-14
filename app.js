@@ -33,21 +33,18 @@ export { generateImage, handleMessage };
 const GENERIC_ERROR_TEXT =
   'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
 
-// Post a "thinking" indicator. Returns the say() result so caller can later delete it.
-async function postThinking(say, thinkingMessage, visibleText = thinkingMessage) {
+const THINKING_REACTION = 'brain';
+
+// Add a :brain: reaction to the user's message to signal Data is processing.
+// Returns true if the reaction landed (so caller can remove it on reply).
+async function addThinkingReaction(app, channel, ts) {
+  if (!channel || !ts) return false;
   try {
-    return await say({
-      text: visibleText,
-      blocks: [
-        {
-          type: 'context',
-          elements: [{ type: 'mrkdwn', text: thinkingMessage }],
-        },
-      ],
-    });
+    await app.client.reactions.add({ channel, timestamp: ts, name: THINKING_REACTION });
+    return true;
   } catch (err) {
-    console.warn('Failed to post thinking message:', err && err.message ? err.message : err);
-    return null;
+    console.warn('Failed to add thinking reaction:', err && err.message ? err.message : err);
+    return false;
   }
 }
 
@@ -69,12 +66,12 @@ function buildReplyPayload({ text, thinking }) {
   };
 }
 
-async function clearThinking(app, channel, ts) {
-  if (!ts) return;
+async function removeThinkingReaction(app, channel, ts) {
+  if (!channel || !ts) return;
   try {
-    await app.client.chat.delete({ channel, ts });
+    await app.client.reactions.remove({ channel, timestamp: ts, name: THINKING_REACTION });
   } catch (err) {
-    console.log('Error deleting thinking message:', err && err.message ? err.message : err);
+    console.log('Failed to remove thinking reaction:', err && err.message ? err.message : err);
   }
 }
 
@@ -136,16 +133,7 @@ function buildToolsFor(deps, channel) {
 
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
 export function registerHandlers(deps) {
-  const {
-    app,
-    chat,
-    convoStore,
-    geminiClient,
-    geminiImageModel,
-    botName,
-    botToken,
-    thinkingMessage,
-  } = deps;
+  const { app, chat, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
 
   app.message(async ({ message, say, context }) => {
     if (!message) {
@@ -193,17 +181,16 @@ export function registerHandlers(deps) {
     if (!hasText && !hasFiles) return;
     if (message.edited || message.subtype) return;
 
-    let thinking = null;
+    const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
-      thinking = await postThinking(say, thinkingMessage);
       const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
       const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(buildReplyPayload(result));
     } catch (error) {
       console.error(`Error in ${channelType} message processing:`, error);
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(GENERIC_ERROR_TEXT);
     }
   });
@@ -251,17 +238,16 @@ export function registerHandlers(deps) {
       return;
     }
 
-    let thinking = null;
+    const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
-      thinking = await postThinking(say, thinkingMessage);
       const images = await extractMessageImages(message, botToken);
       const tools = buildToolsFor(deps, message.channel);
       const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(buildReplyPayload(result));
     } catch (error) {
       console.error('Error in direct mention processing:', error);
-      if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
+      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
       await say(GENERIC_ERROR_TEXT);
     }
   });
