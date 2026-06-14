@@ -92,7 +92,9 @@ async function extractMessageImages(message, botToken) {
       const buf = Buffer.from(await res.arrayBuffer());
       out.push({ mimeType: file.mimetype, data: buf.toString('base64') });
       console.log(
-        `Vision: extracted ${file.mimetype} (${(buf.length / 1024).toFixed(1)}KB) from Slack file ${file.id}`
+        `Vision: extracted ${file.mimetype} (${(buf.length / 1024).toFixed(1)}KB) from Slack file ${
+          file.id
+        }`
       );
     } catch (err) {
       console.warn(`Slack file fetch ${file.id} failed:`, err.message);
