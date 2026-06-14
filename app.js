@@ -105,7 +105,7 @@ async function extractMessageImages(message, botToken) {
 // Construct a tools registry bound to a specific Slack channel so tool side
 // effects (image upload, joke post, etc.) land in the right place. Cheap to
 // build per-message — the closures only capture a handful of values.
-function buildToolsFor(deps, channel) {
+function buildToolsFor(deps, channel, threadTs) {
   const { app, geminiClient, geminiImageModel, botToken, botName } = deps;
   return makeTools({
     geminiClient,
@@ -116,6 +116,7 @@ function buildToolsFor(deps, channel) {
       await app.client.files.uploadV2({
         token: botToken,
         channel_id: channel,
+        ...(threadTs ? { thread_ts: threadTs } : {}),
         file: buffer,
         filename: 'gemini-image.png',
         title: prompt,
@@ -126,6 +127,7 @@ function buildToolsFor(deps, channel) {
     async slackPostBlocks(payload) {
       const args =
         typeof payload === 'string' ? { channel, text: payload } : { channel, ...payload };
+      if (threadTs) args.thread_ts = threadTs;
       await app.client.chat.postMessage(args);
     },
   });
@@ -198,14 +200,26 @@ export function registerHandlers(deps) {
   app.message(directMention(), async ({ message, say }) => {
     if (!message) return;
     if (message.subtype) return;
+    // Bail on bot-originated messages to prevent loops; thread replies from
+    // humans are allowed through so Data can hold a back-and-forth in-thread.
+    if (message.bot_profile || message.bot_id) return;
+
+    // Channel @-mentions reply in-thread: continue the existing thread if the
+    // mention came from one, otherwise start a new thread rooted at the
+    // mention itself. Keeps Data from flooding the channel.
+    const threadTs = message.thread_ts || message.ts;
+    const sayInThread = (payload) => {
+      const obj = typeof payload === 'string' ? { text: payload } : payload;
+      return say({ ...obj, thread_ts: threadTs });
+    };
 
     if (message.text && message.text.toLowerCase().includes('help')) {
-      await say(buildHelpText(botName));
+      await sayInThread(buildHelpText(botName));
       return;
     }
 
     if (message.text && message.text.toLowerCase().includes('the rules')) {
-      await say(ASIMOV_RULES);
+      await sayInThread(ASIMOV_RULES);
       return;
     }
 
@@ -213,14 +227,14 @@ export function registerHandlers(deps) {
       try {
         const joke = await fetchDadJoke(fetch);
         const { joke: jokeText, zinger } = formatDadJoke(joke);
-        await say(jokeText);
+        await sayInThread(jokeText);
         if (zinger) {
           await new Promise((resolve) => setTimeout(resolve, 10000));
-          await say(zinger);
+          await sayInThread(zinger);
         }
       } catch (error) {
         console.error(error);
-        await say(`Encountered an error :( ${error}`);
+        await sayInThread(`Encountered an error :( ${error}`);
       }
       return;
     }
@@ -228,27 +242,19 @@ export function registerHandlers(deps) {
     const hasText = message.text && message.text.trim() !== '';
     const hasFiles = !!message.files?.length;
     if (!hasText && !hasFiles) return;
-    if (
-      message.edited ||
-      message.thread_ts ||
-      message.parent_user_id ||
-      message.bot_profile ||
-      message.bot_id
-    ) {
-      return;
-    }
+    if (message.edited) return;
 
     const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
       const images = await extractMessageImages(message, botToken);
-      const tools = buildToolsFor(deps, message.channel);
+      const tools = buildToolsFor(deps, message.channel, threadTs);
       const result = await handleMessage({ ...message, images }, { chat, convoStore, tools });
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await say(buildReplyPayload(result));
+      await sayInThread(buildReplyPayload(result));
     } catch (error) {
       console.error('Error in direct mention processing:', error);
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await say(GENERIC_ERROR_TEXT);
+      await sayInThread(GENERIC_ERROR_TEXT);
     }
   });
 
