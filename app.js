@@ -68,10 +68,17 @@ const VISION_MIME_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 
 // Pull any image attachments off a Slack message, fetch them with the bot
 // token, return `[{ mimeType, data: base64 }]` for the chat layer. Anything
-// non-image or that fails to fetch is silently skipped.
+// non-image or that fails to fetch is logged and skipped.
 async function extractMessageImages(message, botToken) {
   if (!message.files?.length) return [];
-  const imageFiles = message.files.filter((f) => VISION_MIME_TYPES.includes(f.mimetype));
+  const allFiles = message.files;
+  const imageFiles = allFiles.filter((f) => VISION_MIME_TYPES.includes(f.mimetype));
+  if (allFiles.length && !imageFiles.length) {
+    console.log(
+      `Message has ${allFiles.length} attachment(s) but none are supported image types:`,
+      allFiles.map((f) => f.mimetype).join(', ')
+    );
+  }
   const out = [];
   for (const file of imageFiles) {
     try {
@@ -84,6 +91,9 @@ async function extractMessageImages(message, botToken) {
       }
       const buf = Buffer.from(await res.arrayBuffer());
       out.push({ mimeType: file.mimetype, data: buf.toString('base64') });
+      console.log(
+        `Vision: extracted ${file.mimetype} (${(buf.length / 1024).toFixed(1)}KB) from Slack file ${file.id}`
+      );
     } catch (err) {
       console.warn(`Slack file fetch ${file.id} failed:`, err.message);
     }
@@ -134,7 +144,10 @@ export function registerHandlers(deps) {
     if (context.botUserId && message.text && message.text.includes(`<@${context.botUserId}>`)) {
       return;
     }
-    if (message.subtype) return;
+    // Slack tags messages with attached files as subtype 'file_share' — let
+    // those through so vision uploads reach the LLM. All other subtypes
+    // (edits, deletes, channel joins, etc.) are skipped.
+    if (message.subtype && message.subtype !== 'file_share') return;
     if (message.bot_id) return;
 
     if (isLoveYou(message.text)) {
@@ -170,7 +183,7 @@ export function registerHandlers(deps) {
     const hasText = message.text && message.text.trim() !== '';
     const hasFiles = !!message.files?.length;
     if (!hasText && !hasFiles) return;
-    if (message.edited || message.subtype) return;
+    if (message.edited) return;
 
     const reacted = await addThinkingReaction(app, message.channel, message.ts);
     try {
@@ -188,7 +201,10 @@ export function registerHandlers(deps) {
 
   app.message(directMention(), async ({ message, say }) => {
     if (!message) return;
-    if (message.subtype) return;
+    // Slack tags messages with attached files as subtype 'file_share' — let
+    // those through so vision uploads reach the LLM. All other subtypes
+    // (edits, deletes, channel joins, etc.) are skipped.
+    if (message.subtype && message.subtype !== 'file_share') return;
     // Bail on bot-originated messages to prevent loops; thread replies from
     // humans are allowed through so Data can hold a back-and-forth in-thread.
     if (message.bot_profile || message.bot_id) return;
