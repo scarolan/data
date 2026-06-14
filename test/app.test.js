@@ -8,5 +8,4 @@ test('importing app.js does not boot the bot or require env vars', async () => {
   // Smoke-check that the public surface is exported.
   assert.strictEqual(typeof app.handleMessage, 'function');
   assert.strictEqual(typeof app.generateImage, 'function');
-  assert.strictEqual(typeof app.cleanLocalLlmResponse, 'function');
 });

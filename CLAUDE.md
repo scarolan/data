@@ -2,7 +2,9 @@
 
 ## Project Overview
 
-**Data** is an LLM-powered Slack chatbot with a Star Trek personality (Lt. Commander Data). It uses the Slack Bolt framework with ChatGPT (or any OpenAI-compatible local LLM) for conversations and Gemini (Nano Banana 2) for image generation.
+**Data** is an LLM-powered Slack chatbot with a Star Trek personality (Lt. Commander Data). It uses the Slack Bolt framework with **Ollama** (default) or **Gemini** as the chat backend, and Gemini (Nano Banana 2) for image generation.
+
+The chat layer talks to each provider's native SDK — no OpenAI chat/completions compatibility shim. Conversation history is owned by the bot (persisted in Redis via Keyv), not by the LLM provider.
 
 ## Quick Reference
 
@@ -19,31 +21,33 @@ npm run format   # Format with Prettier
 
 - **`app.js` is a thin glue layer** (~300 lines) that wires Bolt handlers onto pure helpers in `lib/`
 - **Socket Mode**: no public URL required; uses WebSocket connection
-- **Persistence**: Redis-backed via Keyv for conversation context
+- **Persistence**: Redis-backed via Keyv for conversation context (per-user message history)
 - **Node.js 18+** (CI matrices on 18, 20, 22; production runs 18 but it's EOL)
 - ESM modules throughout
 
 ## Layout
 
 ```
-app.js                  # Bolt handler wiring + start() (~300 lines)
+app.js                     # Bolt handler wiring + start() (~300 lines)
 lib/
-  responses.js          # Pure trigger-word matchers, help text, dad joke, Asimov rules
-  chat.js               # handleMessage, cleanLocalLlmResponse (deps injected)
-  image.js              # generateImage via Gemini (client + model injected)
-  deps.js               # buildDeps() factory, validateRequiredEnv()
+  responses.js             # Pure trigger-word matchers, help text, dad joke, Asimov rules
+  chat.js                  # handleMessage — backend-agnostic, history in convoStore
+  chat-backends.js         # makeOllamaChat() / makeGeminiChat() adapter factories
+  image.js                 # generateImage via Gemini (client + model injected)
+  deps.js                  # buildDeps() factory, validateRequiredEnv()
 test/
-  responses.test.js     # Matcher + helper coverage
-  chat.test.js          # handleMessage with mocked ChatGPT
-  image.test.js         # generateImage with mocked Gemini
-  app.test.js           # Import-safety smoke test
-  package.test.js       # package.json sanity checks
-manifest.yaml           # Slack app configuration
-package.json            # Dependencies and scripts
-.env.example            # Environment variable template
-ARCHITECTURE.md         # Detailed architecture documentation
-AGENTS.md               # Conventions for AI agents working in this repo
-.github/workflows/ci.yml  # Lint + tests + syntax check + audit on Node 18/20/22
+  responses.test.js        # Matcher + helper coverage
+  chat.test.js             # handleMessage + convoStore persistence
+  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation
+  image.test.js            # generateImage with mocked Gemini
+  app.test.js              # Import-safety smoke test
+  package.test.js          # package.json sanity checks
+manifest.yaml              # Slack app configuration
+package.json               # Dependencies and scripts
+.env.example               # Environment variable template
+ARCHITECTURE.md            # Detailed architecture documentation
+AGENTS.md                  # Conventions for AI agents working in this repo
+.github/workflows/ci.yml   # Lint + tests + syntax check + audit on Node 18/20/22
 ```
 
 ## Key Exports
@@ -52,11 +56,21 @@ AGENTS.md               # Conventions for AI agents working in this repo
 
 | Export | Source | Purpose |
 |--------|--------|---------|
-| `handleMessage(msg, { chat, parentIds, isLocalLlm })` | `lib/chat.js` | Route Slack message through ChatGPT, threading per-user context |
+| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter, persist per-user history |
 | `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
-| `cleanLocalLlmResponse(text, isLocalLlm)` | `lib/chat.js` | Strip Llama/Gemma tokenizer artifacts |
 | `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
 | `start(deps)` | `app.js` | Wire signals + register handlers + `app.start()` |
+
+## Chat backends
+
+`lib/chat-backends.js` exposes two factories that each return an object with a uniform `chat({ messages }) → { text }` method. `handleMessage` only ever calls this method — it has no idea which provider it's talking to.
+
+| Backend | SDK | Model env | Notes |
+|---------|-----|-----------|-------|
+| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `llama3.1`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `think`, `tools`, `format`, vision. |
+| `gemini` | `@google/genai` | `GEMINI_CHAT_MODEL` (default `gemini-3-flash-latest`) | Reuses the same client as image generation. Translates roles (`assistant` → `model`) and lifts the system message into `config.systemInstruction`. |
+
+Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at adapter construction time, not passed per call.
 
 ## Message Handlers
 
@@ -72,18 +86,18 @@ Loaded from `.env` via dotenv (see `.env.example`).
 - `SLACK_BOT_TOKEN` — Bot OAuth token (`xoxb-...`)
 - `SLACK_APP_TOKEN` — App-level token for Socket Mode (`xapp-...`)
 - `SLACK_BOT_USER_NAME` — Bot's display name in Slack
-- `OPENAI_API_KEY` — required unless using a local LLM (see `LLM_API_BASE_URL`)
-- `GEMINI_API_KEY` — required for the `/image` slash command
+- `GEMINI_API_KEY` — required for the `/image` slash command, and for chat when `CHAT_BACKEND=gemini`
 
 **Optional:**
-- `LLM_API_BASE_URL` — point at an OpenAI-compatible local endpoint (e.g. `http://kepler.local:11434/v1` for Ollama)
-- `LLM_MODEL` — model name for the chat backend (default: `gpt-4o`)
+- `CHAT_BACKEND` — `ollama` (default) or `gemini`
+- `OLLAMA_HOST` — Ollama endpoint (default: `http://localhost:11434`)
+- `OLLAMA_MODEL` — Ollama chat model (default: `llama3.1`)
+- `GEMINI_CHAT_MODEL` — Gemini chat model (default: `gemini-3-flash-latest`)
 - `GEMINI_IMAGE_MODEL` — override the default image model (default: `gemini-3.1-flash-image`)
-- `BOT_PERSONALITY` — Custom system prompt for ChatGPT
+- `BOT_PERSONALITY` — Custom system prompt
 - `THINKING_MESSAGE` — Custom processing indicator text
 - `REDIS_URL` — Redis connection (default: `redis://localhost:6379`)
 - `MEMORY_TTL_HOURS` — Conversation memory lifetime (default: 24)
-- `MEMORY_MAX_KEYS` — Max stored message IDs (default: 10000)
 
 ## Code Style
 
@@ -95,10 +109,10 @@ Loaded from `.env` via dotenv (see `.env.example`).
 ## External APIs
 
 - **Slack** (Bolt SDK) — Messaging, file uploads, events
-- **OpenAI ChatGPT** (`gpt-4o`) — Conversations via `chatgpt` package; the same package transparently talks to any OpenAI-compatible endpoint when `LLM_API_BASE_URL` is set
-- **Google Gemini** (`gemini-3.1-flash-image`, "Nano Banana 2") — Image generation via `@google/genai`
+- **Ollama** (`ollama` npm package) — Native chat API, default backend
+- **Google Gemini** (`@google/genai`) — Image generation (`gemini-3.1-flash-image`, "Nano Banana 2") and optional chat backend (`gemini-3-flash-latest`)
 - **icanhazdadjoke.com** — Dad jokes endpoint
-- **Redis** — Conversation context persistence
+- **Redis** — Conversation history persistence
 
 ## Canned Responses
 
@@ -116,14 +130,16 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 
 - Uses Node.js built-in test runner (`node --test`)
 - Tests live under `test/` — one `*.test.js` per source module
-- **Tests must not require any env vars or external services.** Mock the external clients (Slack/Bolt, ChatGPT, Gemini, fetch) at the boundary; test real internal logic directly. See `test/chat.test.js` for the deps-injection pattern.
+- **Tests must not require any env vars or external services.** Mock the external clients (Slack/Bolt, Ollama, Gemini, fetch) at the boundary; test real internal logic directly. See `test/chat.test.js` for the convoStore + adapter mock pattern.
 - CI: lint → tests → syntax-check `app.js` and every `lib/*.js` → `npm audit --omit=dev --audit-level=high` (non-blocking)
 
 ## Common Tasks
 
 **Adding a new canned response:** Add a matcher + helper to `lib/responses.js`, write a unit test for it in `test/responses.test.js`, then add a thin call site inside `registerHandlers()` in `app.js`.
 
-**Modifying bot personality:** Set `BOT_PERSONALITY` env var, or edit the default in `buildDeps()` in `lib/deps.js`.
+**Modifying bot personality:** Set `BOT_PERSONALITY` env var, or edit the default in `buildDeps()` in `lib/deps.js`. Personality is bound at adapter construction; restart to pick up changes.
+
+**Adding a new chat backend:** Add a `make<Backend>Chat(...)` factory in `lib/chat-backends.js` that returns `{ async chat({ messages }) → { text } }`. Wire backend selection in `buildDeps()`. Add tests in `test/chat-backends.test.js` that assert the wire-format translation.
 
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 
