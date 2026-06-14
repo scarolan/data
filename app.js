@@ -22,7 +22,7 @@ import { directMention } from '@slack/bolt';
 import fetch from 'node-fetch';
 
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
-import { cleanLocalLlmResponse, handleMessage } from './lib/chat.js';
+import { handleMessage } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
 import {
   ASIMOV_RULES,
@@ -42,7 +42,7 @@ import {
   isTikTok,
 } from './lib/responses.js';
 
-export { cleanLocalLlmResponse, generateImage, handleMessage };
+export { generateImage, handleMessage };
 
 const GENERIC_ERROR_TEXT =
   'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
@@ -79,13 +79,12 @@ export function registerHandlers(deps) {
   const {
     app,
     chat,
+    convoStore,
     geminiClient,
     geminiImageModel,
-    isLocalLlm,
     botName,
     botToken,
     thinkingMessage,
-    parentIds,
   } = deps;
 
   app.message(async ({ message, say, context }) => {
@@ -135,7 +134,7 @@ export function registerHandlers(deps) {
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, parentIds, isLocalLlm });
+      const responseText = await handleMessage(message, { chat, convoStore });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {
@@ -194,7 +193,7 @@ export function registerHandlers(deps) {
     let thinking = null;
     try {
       thinking = await postThinking(say, thinkingMessage);
-      const responseText = await handleMessage(message, { chat, parentIds, isLocalLlm });
+      const responseText = await handleMessage(message, { chat, convoStore });
       if (thinking && thinking.ts) await clearThinking(app, message.channel, thinking.ts);
       await say(responseText);
     } catch (error) {
