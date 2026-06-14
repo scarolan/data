@@ -48,22 +48,11 @@ async function addThinkingReaction(app, channel, ts) {
   }
 }
 
-// Build a Slack `say()` payload from a chat result. When the model surfaced a
-// thinking trace, render it as a small italicized context block above the
-// final reply so users can see Data "compute" in character.
-function buildReplyPayload({ text, thinking }) {
-  if (!thinking) return text;
-  const truncated = thinking.length > 1200 ? thinking.slice(0, 1200) + '…' : thinking;
-  return {
-    text,
-    blocks: [
-      {
-        type: 'context',
-        elements: [{ type: 'mrkdwn', text: `:brain: _Thinking: ${truncated}_` }],
-      },
-      { type: 'section', text: { type: 'mrkdwn', text } },
-    ],
-  };
+// Pull the user-visible text off the chat result. Thinking traces are
+// captured by the backend but deliberately not rendered — the :brain:
+// reaction on the user's message is Data's "I'm working on this" UI.
+function buildReplyPayload({ text }) {
+  return text;
 }
 
 async function removeThinkingReaction(app, channel, ts) {
