@@ -12,18 +12,34 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [18, 20, 22]
+
     steps:
       - uses: actions/checkout@v4
-      - name: Use Node.js 18
+
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
+
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
       - name: Run ESLint
         run: npm run lint
+
       - name: Run tests
         run: npm test
-      - name: Node syntax check
-        run: node --check ./app.js
+
+      - name: Syntax-check sources
+        run: |
+          node --check ./app.js
+          for f in lib/*.js; do node --check "$f"; done
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
