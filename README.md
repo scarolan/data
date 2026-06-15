@@ -132,7 +132,7 @@ When using the `/dalle` slash command:
 | SLACK_BOT_TOKEN     | Yes      | Your Slack bot token from OAuth section            |
 | SLACK_APP_TOKEN     | Yes      | Your Slack app-level token                         |
 | SLACK_BOT_USER_NAME | Yes      | Must match the short name of your bot user         |
-| OPENAI_API_KEY      | Yes      | Your OpenAI API key                                |
+| GEMINI_API_KEY      | Yes      | Used for image generation                          |
 | BOT_PERSONALITY     | No       | Custom personality prompt for your bot             |
 | THINKING_MESSAGE    | No       | Custom thinking indicator message                  |
 | REDIS_URL           | No       | Custom Redis URL (default: redis://localhost:6379) |
