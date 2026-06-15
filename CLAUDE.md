@@ -57,6 +57,7 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 | Export | Source | Purpose |
 |--------|--------|---------|
 | `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter; returns `{ text, thinking? }` |
+| `clearHistory(userId, { convoStore })` | `lib/chat.js` | Delete a user's stored conversation history (backs `/forget`) |
 | `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
 | `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
 | `start(deps)` | `app.js` | Wire signals + register handlers + `app.start()` |
@@ -76,7 +77,9 @@ Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at a
 
 1. **General messages** (`app.message()`) — DMs, channel messages, MPIM
 2. **Direct mentions** (`app.message(directMention())`) — `@Data` mentions
-3. **Slash commands** (`app.command('/image')`) — Image generation via Gemini
+3. **Slash commands**
+   - `app.command('/image')` — Image generation via Gemini
+   - `app.command('/forget')` — Wipe the invoking user's conversation history (calls `clearHistory`)
 
 ## Environment Variables
 

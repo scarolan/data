@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert';
 
-import { handleMessage } from '../lib/chat.js';
+import { handleMessage, clearHistory } from '../lib/chat.js';
 
-// Minimal in-memory convoStore that quacks like Keyv (async get/set).
+// Minimal in-memory convoStore that quacks like Keyv (async get/set/delete).
 function makeFakeConvoStore(initial = {}) {
   const data = new Map(Object.entries(initial));
   return {
@@ -14,6 +14,9 @@ function makeFakeConvoStore(initial = {}) {
     async set(key, value) {
       data.set(key, value);
       return true;
+    },
+    async delete(key) {
+      return data.delete(key);
     },
   };
 }
@@ -132,6 +135,48 @@ test('handleMessage does not persist history when the backend errors', async () 
 
   const stored = await convoStore.get('convo:U1');
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
+});
+
+// --- clearHistory ---------------------------------------------------------
+
+test('clearHistory removes the stored history for a user', async () => {
+  const convoStore = makeFakeConvoStore({
+    'convo:U1': [{ role: 'user', content: 'remember this' }],
+    'convo:U2': [{ role: 'user', content: 'keep me' }],
+  });
+
+  const ok = await clearHistory('U1', { convoStore });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(await convoStore.get('convo:U1'), undefined);
+  // Other users are untouched.
+  assert.deepStrictEqual(await convoStore.get('convo:U2'), [{ role: 'user', content: 'keep me' }]);
+});
+
+test('clearHistory is a no-op-safe when there is nothing stored', async () => {
+  const convoStore = makeFakeConvoStore();
+  const ok = await clearHistory('U1', { convoStore });
+  assert.strictEqual(ok, true);
+  assert.strictEqual(await convoStore.get('convo:U1'), undefined);
+});
+
+test('clearHistory returns false for a missing user id', async () => {
+  const convoStore = makeFakeConvoStore();
+  const ok = await clearHistory(undefined, { convoStore });
+  assert.strictEqual(ok, false);
+});
+
+test('a user can chat, forget, then start fresh', async () => {
+  const chat = makeFakeChat({ reply: 'ack' });
+  const convoStore = makeFakeConvoStore();
+
+  await handleMessage({ text: 'my name is Geordi', user: 'U1' }, { chat, convoStore });
+  await clearHistory('U1', { convoStore });
+
+  // Next turn sees no prior context.
+  await handleMessage({ text: 'do you remember my name?', user: 'U1' }, { chat, convoStore });
+  assert.deepStrictEqual(chat.calls[chat.calls.length - 1].messages, [
+    { role: 'user', content: 'do you remember my name?' },
+  ]);
 });
 
 // --- Thinking -------------------------------------------------------------

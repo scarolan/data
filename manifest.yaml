@@ -13,6 +13,9 @@ features:
       description: Generate an image with Gemini
       usage_hint: '<prompt>'
       should_escape: false
+    - command: /forget
+      description: Erase your conversation history with Data
+      should_escape: false
 oauth_config:
   scopes:
     bot:

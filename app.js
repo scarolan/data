@@ -9,7 +9,7 @@ import { directMention } from '@slack/bolt';
 import fetch from 'node-fetch';
 
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
-import { handleMessage } from './lib/chat.js';
+import { handleMessage, clearHistory } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
 import {
   ASIMOV_RULES,
@@ -303,6 +303,31 @@ export function registerHandlers(deps) {
       try {
         await respond({
           text: `❌ Error processing command: ${error.message}`,
+          response_type: 'ephemeral',
+        });
+      } catch (respondError) {
+        console.error('Failed to send error response:', respondError);
+      }
+    }
+  });
+
+  // Let a user wipe their own conversation history. History is keyed by user id
+  // alone, so this resets Data's memory of the user everywhere, not just the
+  // channel the command was invoked from. Reply is ephemeral so it stays quiet.
+  app.command('/forget', async ({ command, ack, respond }) => {
+    try {
+      await ack();
+      await clearHistory(command.user_id, { convoStore });
+      console.log(`Cleared conversation history for user ${command.user_id}`);
+      await respond({
+        text: 'My memory of our previous conversation has been erased. I am now a blank slate, ready to begin anew. How may I assist you?',
+        response_type: 'ephemeral',
+      });
+    } catch (error) {
+      console.error('Error in /forget command handling:', error);
+      try {
+        await respond({
+          text: `❌ I was unable to clear our conversation history: ${error.message}`,
           response_type: 'ephemeral',
         });
       } catch (respondError) {
