@@ -16,22 +16,23 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 - **`lib/image.js`** — `generateImage()`. Takes the Gemini client and model name via `deps`.
 - **`lib/deps.js`** — `buildDeps()` factory + `validateRequiredEnv()`. Constructs the Slack `App`, the Keyv/Redis `convoStore`, the `GoogleGenAI` client, and the selected chat adapter; tests can override any of them.
 - **Slack (Bolt JS)** — receives events in Socket Mode and dispatches them to the handlers registered by `registerHandlers(deps)`.
-- **Ollama (`ollama` npm package)** — default chat backend. Native SDK; no OpenAI compat shim. Talks to `OLLAMA_HOST` (default `http://localhost:11434`). Room to extend with `think`, `tools`, `format`, vision.
+- **Ollama (`ollama` npm package)** — default chat backend. Native SDK; no OpenAI compat shim. Talks to `OLLAMA_HOST` (default `http://localhost:11434`). Supports vision (base64 images) and reasoning traces (`OLLAMA_THINK`); strips Llama tokenizer artifacts at the adapter boundary.
 - **Gemini (`@google/genai`)** — image generation (`gemini-3.1-flash-image`, "Nano Banana 2") and optional chat backend (`gemini-3-flash-latest`). One client serves both.
 - **Persistence (Keyv + KeyvRedis)** — stores per-user conversation history (`{role, content}` arrays) keyed by `convo:<userId>`, backed by Redis (`REDIS_URL`). TTL via `MEMORY_TTL_HOURS`. History survives process restarts.
 - **Tests** — under `test/` run with `node --test`; see `test/chat.test.js` and `test/chat-backends.test.js` for the adapter + convoStore mock patterns.
-- **CI** — GitHub Actions matrix on Node 18/20/22: install, lint, tests, syntax-check of `app.js` + every `lib/*.js`, and a non-blocking `npm audit` at high severity.
+- **CI** — GitHub Actions matrix on Node 22/24: install, lint, tests, syntax-check of `app.js` + every `lib/*.js`, and a non-blocking `npm audit` at high severity.
 
 ## Message flows
 
 1. Incoming message arrives via Bolt Socket Mode.
 2. The general message handler (`app.message(...)`) checks pure matchers from `lib/responses.js` in order (love-you → pod-bay → danceparty → tiktok → rickroll). On a match it calls `say()` with the helper output and returns.
-3. If no canned match and the channel is a DM or MPIM, the handler posts a "thinking" indicator, calls `handleMessage(msg, { chat, convoStore })`, deletes the indicator, and replies with the result.
-4. Direct-mention handler (`app.message(directMention(), ...)`) checks for `help`, `the rules`, `dad joke`, and image-request guidance before falling through to `handleMessage()` with the same thinking UX.
+3. If no canned match and the channel is a DM or MPIM, the handler adds a `:brain:` reaction to the user's message, extracts any image attachments (`extractMessageImages`), calls `handleMessage(msg, { chat, convoStore })`, removes the reaction, and replies with the result.
+4. Direct-mention handler (`app.message(directMention(), ...)`) checks for `help`, `the rules`, `dad joke`, and image-request guidance before falling through to `handleMessage()` with the same reaction UX. Channel @-mentions reply in-thread (continuing an existing thread or starting one rooted at the mention); DMs reply flat.
 5. Slash command `/image`:
    - `ack()` immediately to avoid Slack timeouts.
    - Respond with an ephemeral progress message.
    - Schedule the heavy work via `queueMicrotask`: call `generateImage(prompt, { client: geminiClient, model })`, then upload the returned `Buffer` to the channel with `files.uploadV2()`.
+6. Slash command `/forget` — calls `clearHistory(user_id, { convoStore })` to wipe the invoking user's stored conversation, replying ephemerally.
 
 ## Chat backend selection
 
@@ -39,7 +40,7 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 
 ## Concurrency & UX
 - Image generation is deferred via `queueMicrotask` so the slash command's `ack()` returns immediately while the upload happens in the background.
-- A small thinking helper (`postThinking` / `clearThinking` in `app.js`) centralizes posting and deleting progress messages.
+- "I'm working on this" UX is a `:brain:` reaction on the user's message: `addThinkingReaction` / `removeThinkingReaction` in `app.js` (requires `reactions:read` + `reactions:write` scopes). Reasoning traces from the backend are captured but deliberately not rendered.
 
 ## Persistence & Conversation Context
 - Per-user message history is stored in `Keyv` (backed by `KeyvRedis` when `REDIS_URL` is set) under `convo:<userId>` as a `[{role, content}, ...]` array.

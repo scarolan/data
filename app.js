@@ -61,7 +61,7 @@ async function removeThinkingReaction(app, channel, ts) {
   try {
     await app.client.reactions.remove({ channel, timestamp: ts, name: THINKING_REACTION });
   } catch (err) {
-    console.log('Failed to remove thinking reaction:', err && err.message ? err.message : err);
+    console.warn('Failed to remove thinking reaction:', err && err.message ? err.message : err);
   }
 }
 
@@ -210,8 +210,13 @@ export function registerHandlers(deps) {
         const { joke: jokeText, zinger } = formatDadJoke(joke);
         await sayInThread(jokeText);
         if (zinger) {
-          await new Promise((resolve) => setTimeout(resolve, 10000));
-          await sayInThread(zinger);
+          // Fire-and-forget the zinger after a beat for comedic timing — don't
+          // hold the handler open for 10s waiting on it. Errors are logged only.
+          setTimeout(() => {
+            sayInThread(zinger).catch((err) =>
+              console.error('Failed to post dad joke zinger:', err)
+            );
+          }, 10000);
         }
       } catch (error) {
         console.error(error);
