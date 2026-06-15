@@ -21,16 +21,14 @@ function makeFakeConvoStore(initial = {}) {
   };
 }
 
-function makeFakeChat({ reply = 'pong', thinking = null, shouldThrow = null } = {}) {
+function makeFakeChat({ reply = 'pong', shouldThrow = null } = {}) {
   const calls = [];
   return {
     calls,
     async chat({ messages }) {
       calls.push({ messages });
       if (shouldThrow) throw shouldThrow;
-      const out = { text: reply };
-      if (thinking) out.thinking = thinking;
-      return out;
+      return { text: reply };
     },
   };
 }
@@ -177,31 +175,6 @@ test('a user can chat, forget, then start fresh', async () => {
   assert.deepStrictEqual(chat.calls[chat.calls.length - 1].messages, [
     { role: 'user', content: 'do you remember my name?' },
   ]);
-});
-
-// --- Thinking -------------------------------------------------------------
-
-test('handleMessage surfaces thinking from the backend, but does not persist it', async () => {
-  const chat = makeFakeChat({ reply: 'Four.', thinking: 'Computing 2+2.' });
-  const convoStore = makeFakeConvoStore();
-  const result = await handleMessage({ text: '2+2?', user: 'U1' }, { chat, convoStore });
-  assert.strictEqual(result.text, 'Four.');
-  assert.match(result.thinking, /Computing/);
-
-  const stored = await convoStore.get('convo:U1');
-  assert.deepStrictEqual(stored, [
-    { role: 'user', content: '2+2?' },
-    { role: 'assistant', content: 'Four.' },
-  ]);
-});
-
-test('handleMessage omits thinking from the result when backend returns none', async () => {
-  const chat = makeFakeChat({ reply: 'hello' });
-  const result = await handleMessage(
-    { text: 'hi', user: 'U1' },
-    { chat, convoStore: makeFakeConvoStore() }
-  );
-  assert.strictEqual(result.thinking, undefined);
 });
 
 // --- Vision ---------------------------------------------------------------

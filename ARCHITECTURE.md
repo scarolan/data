@@ -16,7 +16,7 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 - **`lib/image.js`** — `generateImage()`. Takes the Gemini client and model name via `deps`.
 - **`lib/deps.js`** — `buildDeps()` factory + `validateRequiredEnv()`. Constructs the Slack `App`, the Keyv/Redis `convoStore`, the `GoogleGenAI` client, and the selected chat adapter; tests can override any of them.
 - **Slack (Bolt JS)** — receives events in Socket Mode and dispatches them to the handlers registered by `registerHandlers(deps)`.
-- **Ollama (`ollama` npm package)** — default chat backend. Native SDK; no OpenAI compat shim. Talks to `OLLAMA_HOST` (default `http://localhost:11434`). Supports vision (base64 images) and reasoning traces (`OLLAMA_THINK`); strips Llama tokenizer artifacts at the adapter boundary.
+- **Ollama (`ollama` npm package)** — default chat backend. Native SDK; no OpenAI compat shim. Talks to `OLLAMA_HOST` (default `http://localhost:11434`). Supports vision (base64 images); strips Llama tokenizer artifacts at the adapter boundary.
 - **Gemini (`@google/genai`)** — image generation (`gemini-3.1-flash-image`, "Nano Banana 2") and optional chat backend (`gemini-3-flash-latest`). One client serves both.
 - **Persistence (Keyv + KeyvRedis)** — stores per-user conversation history (`{role, content}` arrays) keyed by `convo:<userId>`, backed by Redis (`REDIS_URL`). TTL via `MEMORY_TTL_HOURS`. History survives process restarts.
 - **Tests** — under `test/` run with `node --test`; see `test/chat.test.js` and `test/chat-backends.test.js` for the adapter + convoStore mock patterns.
@@ -40,7 +40,7 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 
 ## Concurrency & UX
 - Image generation is deferred via `queueMicrotask` so the slash command's `ack()` returns immediately while the upload happens in the background.
-- "I'm working on this" UX is a `:brain:` reaction on the user's message: `addThinkingReaction` / `removeThinkingReaction` in `app.js` (requires `reactions:read` + `reactions:write` scopes). Reasoning traces from the backend are captured but deliberately not rendered.
+- "I'm working on this" UX is a `:brain:` reaction on the user's message: `addThinkingReaction` / `removeThinkingReaction` in `app.js` (requires `reactions:read` + `reactions:write` scopes). Backend reasoning traces are not captured or rendered — that plumbing was removed (see CLAUDE.md, #27).
 
 ## Persistence & Conversation Context
 - Per-user message history is stored in `Keyv` (backed by `KeyvRedis` when `REDIS_URL` is set) under `convo:<userId>` as a `[{role, content}, ...]` array.
@@ -82,4 +82,4 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 - Replace `console` logging with a structured logger and optional remote export.
 - Consider an explicit Redis client passed into KeyvRedis to control connection lifecycle.
 - Cover the Bolt handlers themselves with integration tests (currently the canned-response *content* is well-tested but the registration glue in `registerHandlers()` is not).
-- Surface Ollama's native features (`think`, `tools`, `format`, vision) through the adapter interface as features call for it.
+- Surface Ollama's native features (`tools`, `format`, vision) through the adapter interface as features call for it.

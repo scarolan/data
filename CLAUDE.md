@@ -38,7 +38,7 @@ lib/
 test/
   responses.test.js        # Matcher + helper coverage
   chat.test.js             # handleMessage + convoStore persistence
-  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation (incl. vision, thinking)
+  chat-backends.test.js    # Ollama + Gemini adapter wire-format translation (incl. vision)
   image.test.js            # generateImage with mocked Gemini
   app.test.js              # Import-safety smoke test
   package.test.js          # package.json sanity checks
@@ -56,7 +56,7 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 | Export | Source | Purpose |
 |--------|--------|---------|
-| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter; returns `{ text, thinking? }` |
+| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter; returns `{ text }` |
 | `clearHistory(userId, { convoStore })` | `lib/chat.js` | Delete a user's stored conversation history (backs `/forget`) |
 | `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
 | `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
@@ -68,7 +68,7 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 | Backend | SDK | Model env | Notes |
 |---------|-----|-----------|-------|
-| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `llama3.1`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `think`, `tools`, `format`, vision. |
+| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `gemma4:31b`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `tools`, `format`, vision. |
 | `gemini` | `@google/genai` | `GEMINI_CHAT_MODEL` (default `gemini-3-flash-latest`) | Reuses the same client as image generation. Translates roles (`assistant` → `model`) and lifts the system message into `config.systemInstruction`. |
 
 Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at adapter construction time, not passed per call.
@@ -94,8 +94,7 @@ Loaded from `.env` via dotenv (see `.env.example`).
 **Optional:**
 - `CHAT_BACKEND` — `ollama` (default) or `gemini`
 - `OLLAMA_HOST` — Ollama endpoint (default: `http://localhost:11434`)
-- `OLLAMA_MODEL` — Ollama chat model (default: `llama3.1`)
-- `OLLAMA_THINK` — surface model thinking traces: `true|low|medium|high` (requires a reasoning model — qwq, gpt-oss, deepseek-r1, etc.)
+- `OLLAMA_MODEL` — Ollama chat model (default: `gemma4:31b`)
 - `GEMINI_CHAT_MODEL` — Gemini chat model (default: `gemini-3-flash-latest`)
 - `GEMINI_IMAGE_MODEL` — override the default image model (default: `gemini-3.1-flash-image`)
 - `BOT_PERSONALITY` — Custom system prompt
@@ -154,7 +153,7 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 
 **Modifying bot personality:** Set `BOT_PERSONALITY` env var, or edit the default in `buildDeps()` in `lib/deps.js`. Personality is bound at adapter construction; restart to pick up changes.
 
-**Adding a new chat backend:** Add a `make<Backend>Chat(...)` factory in `lib/chat-backends.js` that returns `{ async chat({ messages }) → { text, thinking? } }`. Wire backend selection in `buildDeps()`. Add tests in `test/chat-backends.test.js` that assert the wire-format translation.
+**Adding a new chat backend:** Add a `make<Backend>Chat(...)` factory in `lib/chat-backends.js` that returns `{ async chat({ messages }) → { text } }`. Wire backend selection in `buildDeps()`. Add tests in `test/chat-backends.test.js` that assert the wire-format translation.
 
 **Note: tool calling is intentionally not part of the architecture.** It was experimented with (see git history around PR #30 and the revert that followed) and removed: the gemma family — Data's preferred backend for its strong vision — emits tool calls as inline text rather than Ollama's structured `tool_calls` field, and most of the original tool registry just duplicated regex matchers that already worked. Image generation is the `/image` slash command (Data also nudges users toward it when they ask for an image in chat via `isImageRequest` + `IMAGE_REQUEST_GUIDANCE`).
 
@@ -165,7 +164,7 @@ These are practical, hard-earned notes about which Ollama models do what well, a
 ### gemma4:31b (current default)
 - **Vision: excellent.** Identified a "communist cat meme" correctly including the hammer-and-sickle symbolism and explained the joke premise unprompted. Strong recognition + sophisticated comprehension.
 - **Tool calling: broken.** Knows what tools are, knows their schemas, but emits calls as plain text — e.g. `<call:generate_image{prompt:"..."}><tool_call|>` — instead of populating Ollama's structured `message.tool_calls` field. Wire-format / template issue, not a prompting issue. Same behavior on `gemma4-openhands:latest` (the agent fine-tune of the same family), so it's a family-wide limitation, not a base-model thing.
-- **Thinking: emits `message.thinking` even when `think:` param is NOT sent.** Found this the hard way when the inline thinking block appeared in Slack despite `OLLAMA_THINK` being unset.
+- **Thinking: emits `message.thinking` even when `think:` param is NOT sent.** Found this the hard way when an inline thinking block appeared in Slack with no thinking knob enabled. (The thinking plumbing has since been removed entirely — see "Why thinking-trace rendering was removed" below.)
 - Verdict: use for chat + vision. Don't try to use it for tools.
 
 ### qwen3.6:27b
@@ -194,10 +193,10 @@ If you ever bring tools back: make sure the model in production actually emits s
 - Requires `reactions:read` and `reactions:write` scopes in `manifest.yaml`.
 - After adding scopes, you MUST re-sync the manifest in api.slack.com AND reinstall the app to the workspace. Failure mode: `missing_scope` errors on every `reactions.add` call, no reaction ever appears, bot looks unresponsive while it's actually working fine.
 
-### Why thinking-trace rendering was suppressed (#27)
+### Why thinking-trace rendering was removed (#27)
 - gemma4 emits `message.thinking` even without `think:` set, and the traces are *long* (full chain-of-thought paragraphs).
-- The inline Block Kit rendering — italicized "Thinking: …" context block above the reply — made every message a wall of text.
-- The `:brain:` reaction is enough of an "I'm working on this" UI. The trace plumbing is still there (`result.thinking` is captured by the adapter and surfaced by `handleMessage`); we just don't render it.
+- The inline Block Kit rendering — italicized "Thinking: …" context block above the reply — made every message a wall of text, and Slack gives no easy way to collapse/hide it.
+- The `:brain:` reaction is enough of an "I'm working on this" UI. The rendering was suppressed first (#27), then the whole plumbing was ripped out: the adapters no longer capture `message.thinking`, `handleMessage` returns `{ text }` only, and the `OLLAMA_THINK` / `think` knob is gone. If you ever want it back, re-add the `think` param in `makeOllamaChat` and surface `result.thinking` from `handleMessage`.
 
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 

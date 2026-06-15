@@ -1,7 +1,8 @@
 ///////////////////////////////////////////////////////////////
 // A bolt.js Slack chatbot. Wires Bolt event handlers onto pure
-// helpers in lib/. Conversation goes through native Ollama or
-// Gemini SDKs; tool calls are dispatched inside lib/chat.js.
+// helpers in lib/. Conversation is routed through native Ollama
+// or Gemini SDKs by lib/chat.js; canned trigger-word replies are
+// matched in lib/responses.js.
 ///////////////////////////////////////////////////////////////
 
 import 'dotenv/config';
@@ -47,13 +48,6 @@ async function addThinkingReaction(app, channel, ts) {
     console.warn('Failed to add thinking reaction:', err && err.message ? err.message : err);
     return false;
   }
-}
-
-// Pull the user-visible text off the chat result. Thinking traces are
-// captured by the backend but deliberately not rendered — the :brain:
-// reaction on the user's message is Data's "I'm working on this" UI.
-function buildReplyPayload({ text }) {
-  return text;
 }
 
 async function removeThinkingReaction(app, channel, ts) {
@@ -167,7 +161,7 @@ export function registerHandlers(deps) {
       const images = await extractMessageImages(message, botToken);
       const result = await handleMessage({ ...message, images }, { chat, convoStore });
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await say(buildReplyPayload(result));
+      await say(result.text);
     } catch (error) {
       console.error(`Error in ${channelType} message processing:`, error);
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
@@ -240,7 +234,7 @@ export function registerHandlers(deps) {
       const images = await extractMessageImages(message, botToken);
       const result = await handleMessage({ ...message, images }, { chat, convoStore });
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await sayInThread(buildReplyPayload(result));
+      await sayInThread(result.text);
     } catch (error) {
       console.error('Error in direct mention processing:', error);
       if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
