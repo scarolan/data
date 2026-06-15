@@ -4,15 +4,21 @@
 
 ## Overview
 
-This is a AI-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to AI for messages that don't match a predefined pattern. You can customize the bot's personality and responses to suit your needs.
+This is an AI-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to a language model for messages that don't match a predefined pattern. Chat is powered by **Ollama** (default, self-hosted) or **Gemini**; image generation uses **Gemini**. You can customize the bot's personality and responses to suit your needs.
 
 ## Prerequisites
 
-You will need a local Redis installation to persist the bot's conversation memory. You can install Redis server on Ubuntu like this:
+- **Node.js 22+** (LTS).
+- A **Redis** installation to persist the bot's conversation memory. On Ubuntu:
 
-```zsh
-sudo apt -y install redis-server
-```
+  ```zsh
+  sudo apt -y install redis-server
+  ```
+
+- A chat backend:
+  - **Ollama** (default) — a running [Ollama](https://ollama.com) instance with a model pulled (e.g. `ollama pull llama3.1`). Point the bot at it with `OLLAMA_HOST`.
+  - **or Gemini** — set `CHAT_BACKEND=gemini` and supply a `GEMINI_API_KEY`.
+- A **`GEMINI_API_KEY`** is required for the `/image` slash command regardless of which chat backend you use.
 
 ## Installation
 
@@ -32,14 +38,20 @@ Then scroll down in Basic Info and click **Generate Token and Scopes** with all 
 
 #### For Linux/Mac
 
+The easiest way is to copy `.env.example` to `.env` and fill it in; the bot loads it via dotenv. Or export them in your shell:
+
 ```zsh
 # Replace with your bot and tokens
 export SLACK_BOT_TOKEN=<your-bot-token> # from the OAuth section
 export SLACK_APP_TOKEN=<your-app-level-token> # from the Basic Info App Token Section
 export SLACK_BOT_USER_NAME=<your-bot-username> # must match the short name of your bot user
-export OPENAI_API_KEY=<your-openai-api-key> # get from here: https://platform.openai.com/account/api-keys
+export GEMINI_API_KEY=<your-gemini-api-key> # for /image, and for chat if CHAT_BACKEND=gemini
 export BOT_PERSONALITY="Your custom bot personality prompt here" # Optional: Set a custom personality for your bot
-export THINKING_MESSAGE=":gear: _Processing your request..._" # Optional: Customize the thinking indicator message
+
+# Optional: choose and configure the chat backend (defaults to local Ollama)
+# export CHAT_BACKEND=ollama
+# export OLLAMA_HOST=http://localhost:11434
+# export OLLAMA_MODEL=llama3.1
 ```
 
 #### For Windows PowerShell
@@ -49,9 +61,8 @@ export THINKING_MESSAGE=":gear: _Processing your request..._" # Optional: Custom
 $env:SLACK_BOT_TOKEN = "xoxb-your-bot-token"
 $env:SLACK_APP_TOKEN = "xapp-your-app-token"
 $env:SLACK_BOT_USER_NAME = "Data" # Change to match your bot's name
-$env:OPENAI_API_KEY = "your-openai-api-key"
+$env:GEMINI_API_KEY = "your-gemini-api-key"
 $env:BOT_PERSONALITY = "Your custom bot personality prompt here" # Optional: Set a custom personality for your bot
-$env:THINKING_MESSAGE = ":gear: _Processing your request..._" # Optional: Customize the thinking indicator message
 
 # Optional: Set Redis URL if you're using a custom Redis instance
 # $env:REDIS_URL = "redis://localhost:6379"
@@ -92,8 +103,7 @@ npm run start
 
 ### 4. Test
 
-Go to the installed workspace and type **help** in a DM to your new bot.
-Use the `/dalle` slash command for functionality:
+Go to the installed workspace and DM your new bot, or `@`-mention it in a channel.
 
 Direct mention example (in a channel or DM):
 
@@ -104,35 +114,41 @@ Direct mention example (in a channel or DM):
 Slash command example (image generation):
 
 ```text
-/dalle An image of Lt. Commander Data and his cat
+/image An image of Lt. Commander Data and his cat
 ```
 
 ### 5. Deploy to production
 
 You'll need a Linux server, container, or application platform that supports nodejs to keep the bot running. Slack has a tutorial for getting an app running on the Glitch platform: https://api.slack.com/tutorials/hello-world-bolt
 
-## Image Generation and Troubleshooting
+## Image Generation
 
-The bot supports generating images with DALL-E through the `/dalle` slash command.
-
-Note: The older direct `@Data image ...` handler was removed to simplify the codebase. Please use `/dalle` for image generation.
+The bot generates images with **Gemini** (Nano Banana) through the `/image` slash command.
 
 ### How Image Generation Works
 
-When using the `/dalle` slash command:
+When using the `/image` slash command:
 
-1. The bot acknowledges your request and shows a "generating" message
+1. The bot acknowledges your request and shows an ephemeral "generating" message
 2. Image generation happens asynchronously in the background
 3. When complete, the image is posted directly to the channel
 
 ## Environment Variables
 
-| Variable            | Required | Description                                        |
-| ------------------- | -------- | -------------------------------------------------- |
-| SLACK_BOT_TOKEN     | Yes      | Your Slack bot token from OAuth section            |
-| SLACK_APP_TOKEN     | Yes      | Your Slack app-level token                         |
-| SLACK_BOT_USER_NAME | Yes      | Must match the short name of your bot user         |
-| GEMINI_API_KEY      | Yes      | Used for image generation                          |
-| BOT_PERSONALITY     | No       | Custom personality prompt for your bot             |
-| THINKING_MESSAGE    | No       | Custom thinking indicator message                  |
-| REDIS_URL           | No       | Custom Redis URL (default: redis://localhost:6379) |
+| Variable            | Required        | Description                                                          |
+| ------------------- | --------------- | -------------------------------------------------------------------- |
+| SLACK_BOT_TOKEN     | Yes             | Your Slack bot token from the OAuth section                          |
+| SLACK_APP_TOKEN     | Yes             | Your Slack app-level token (Socket Mode)                             |
+| SLACK_BOT_USER_NAME | Yes             | Must match the short name of your bot user                           |
+| GEMINI_API_KEY      | Yes             | Used for `/image`; also for chat when `CHAT_BACKEND=gemini`          |
+| CHAT_BACKEND        | No              | `ollama` (default) or `gemini`                                       |
+| OLLAMA_HOST         | No              | Ollama endpoint (default: `http://localhost:11434`)                  |
+| OLLAMA_MODEL        | No              | Ollama chat model (default: `llama3.1`)                              |
+| OLLAMA_THINK        | No              | Surface reasoning traces: `true\|low\|medium\|high`                  |
+| GEMINI_CHAT_MODEL   | No              | Gemini chat model (default: `gemini-3-flash-latest`)                 |
+| GEMINI_IMAGE_MODEL  | No              | Override the default image model                                     |
+| BOT_PERSONALITY     | No              | Custom personality prompt for your bot                               |
+| REDIS_URL           | No              | Custom Redis URL (default: `redis://localhost:6379`)                 |
+| MEMORY_TTL_HOURS    | No              | Conversation memory lifetime in hours (default: 24)                  |
+
+See `.env.example` for a copy-pasteable template.

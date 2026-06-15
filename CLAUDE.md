@@ -22,7 +22,7 @@ npm run format   # Format with Prettier
 - **`app.js` is a thin glue layer** (~300 lines) that wires Bolt handlers onto pure helpers in `lib/`
 - **Socket Mode**: no public URL required; uses WebSocket connection
 - **Persistence**: Redis-backed via Keyv for conversation context (per-user message history)
-- **Node.js 18+** (CI matrices on 18, 20, 22; production runs 18 but it's EOL)
+- **Node.js 22+** (CI matrices on 22, 24; production runs 22 LTS)
 - ESM modules throughout
 
 ## Layout
@@ -47,7 +47,7 @@ package.json               # Dependencies and scripts
 .env.example               # Environment variable template
 ARCHITECTURE.md            # Detailed architecture documentation
 AGENTS.md                  # Conventions for AI agents working in this repo
-.github/workflows/ci.yml   # Lint + tests + syntax check + audit on Node 18/20/22
+.github/workflows/ci.yml   # Lint + tests + syntax check + audit on Node 22/24
 ```
 
 ## Key Exports
