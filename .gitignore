@@ -5,3 +5,6 @@ package-lock.json
 # Local environment and credentials
 run_bot.ps1
 *.env
+
+# Local Claude Code settings
+.claude/
