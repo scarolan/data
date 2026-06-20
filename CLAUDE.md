@@ -68,7 +68,7 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 | Backend | SDK | Model env | Notes |
 |---------|-----|-----------|-------|
-| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `gemma4:31b`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `tools`, `format`, vision. |
+| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `gemma4:26b-a4b-it-qat`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `tools`, `format`, vision. |
 | `gemini` | `@google/genai` | `GEMINI_CHAT_MODEL` (default `gemini-3-flash-latest`) | Reuses the same client as image generation. Translates roles (`assistant` → `model`) and lifts the system message into `config.systemInstruction`. |
 
 Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at adapter construction time, not passed per call.
@@ -94,7 +94,7 @@ Loaded from `.env` via dotenv (see `.env.example`).
 **Optional:**
 - `CHAT_BACKEND` — `ollama` (default) or `gemini`
 - `OLLAMA_HOST` — Ollama endpoint (default: `http://localhost:11434`)
-- `OLLAMA_MODEL` — Ollama chat model (default: `gemma4:31b`)
+- `OLLAMA_MODEL` — Ollama chat model (default: `gemma4:26b-a4b-it-qat`)
 - `GEMINI_CHAT_MODEL` — Gemini chat model (default: `gemini-3-flash-latest`)
 - `GEMINI_IMAGE_MODEL` — override the default image model (default: `gemini-3.1-flash-image`)
 - `BOT_PERSONALITY` — Custom system prompt
@@ -161,7 +161,12 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 
 These are practical, hard-earned notes about which Ollama models do what well, and what's worth knowing when picking `OLLAMA_MODEL`. Save your future self a debugging session.
 
-### gemma4:31b (current default)
+### gemma4:26b-a4b-it-qat (current default)
+- Same gemma4 family as `gemma4:31b` below, in an MoE shape: ~26B total params, ~4B active per token (`a4b`), instruction-tuned (`it`), quantization-aware-trained (`qat`). The draw is much lower active-param cost — faster responses and a smaller memory footprint than the 31B dense default — while staying in the family Data relies on for vision.
+- **Vision / tool calling: expected to match the family** (strong vision, broken structured tool calls) since it shares the gemma4 lineage, but this has NOT been verified live yet. Confirm vision quality in Slack before fully trusting it, and assume tools are still text-emitted (we don't use tools anyway — see "Why tool calling was removed").
+- If it underperforms the 31B on vision in practice, fall back by setting `OLLAMA_MODEL=gemma4:31b`.
+
+### gemma4:31b (previous default)
 - **Vision: excellent.** Identified a "communist cat meme" correctly including the hammer-and-sickle symbolism and explained the joke premise unprompted. Strong recognition + sophisticated comprehension.
 - **Tool calling: broken.** Knows what tools are, knows their schemas, but emits calls as plain text — e.g. `<call:generate_image{prompt:"..."}><tool_call|>` — instead of populating Ollama's structured `message.tool_calls` field. Wire-format / template issue, not a prompting issue. Same behavior on `gemma4-openhands:latest` (the agent fine-tune of the same family), so it's a family-wide limitation, not a base-model thing.
 - **Thinking: emits `message.thinking` even when `think:` param is NOT sent.** Found this the hard way when an inline thinking block appeared in Slack with no thinking knob enabled. (The thinking plumbing has since been removed entirely — see "Why thinking-trace rendering was removed" below.)

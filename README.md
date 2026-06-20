@@ -143,7 +143,7 @@ When using the `/image` slash command:
 | GEMINI_API_KEY      | Yes             | Used for `/image`; also for chat when `CHAT_BACKEND=gemini`          |
 | CHAT_BACKEND        | No              | `ollama` (default) or `gemini`                                       |
 | OLLAMA_HOST         | No              | Ollama endpoint (default: `http://localhost:11434`)                  |
-| OLLAMA_MODEL        | No              | Ollama chat model (default: `gemma4:31b`)                            |
+| OLLAMA_MODEL        | No              | Ollama chat model (default: `gemma4:26b-a4b-it-qat`)                 |
 | GEMINI_CHAT_MODEL   | No              | Gemini chat model (default: `gemini-3-flash-latest`)                 |
 | GEMINI_IMAGE_MODEL  | No              | Override the default image model                                     |
 | BOT_PERSONALITY     | No              | Custom personality prompt for your bot                               |
