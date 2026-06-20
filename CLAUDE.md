@@ -178,7 +178,7 @@ These are practical, hard-earned notes about which Ollama models do what well, a
 - Verdict: pick this when tools matter and vision doesn't.
 
 ### What's pulled on `kepler.local`
-As of this writing: `gemma4:latest`, `gemma4:31b`, `gemma4-openhands:latest`, `llama3.3:70b-instruct-q8_0` (75GB, slow), `qwen3.6:27b`, `qwen3.6-openhands:latest`, `qwen3.6:35b-a3b`, `qwen3-coder-next:latest`, `qwen3-coder-openhands:latest`, `devstral-small-2:latest`, `nomic-embed-text:latest`. None of these are vision+tools-in-one. If you ever want both natively, pull something like `qwen2.5-vl:32b` or `mistral-small3.1` and try.
+As of this writing: `gemma4:26b-a4b-it-qat` (current default), `gemma4:latest`, `gemma4:31b`, `gemma4-openhands:latest`, `llama3.3:70b-instruct-q8_0` (75GB, slow), `qwen3.6:27b`, `qwen3.6-openhands:latest`, `qwen3.6:35b-a3b`, `qwen3-coder-next:latest`, `qwen3-coder-openhands:latest`, `devstral-small-2:latest`, `nomic-embed-text:latest`. None of these are vision+tools-in-one. If you ever want both natively, pull something like `qwen2.5-vl:32b` or `mistral-small3.1` and try.
 
 ### Why tool calling was removed
 1. **6 of 7 tools duplicated regex matchers** (`tell_dad_joke`, `state_asimovs_laws`, `show_help`, `start_dance_party`, `play_rickroll`, `play_tiktok`) — slower and less reliable than the existing exact-phrase triggers.
