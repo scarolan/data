@@ -201,7 +201,8 @@ If you ever bring tools back: make sure the model in production actually emits s
 ### Why thinking-trace rendering was removed (#27)
 - gemma4 emits `message.thinking` even without `think:` set, and the traces are *long* (full chain-of-thought paragraphs).
 - The inline Block Kit rendering — italicized "Thinking: …" context block above the reply — made every message a wall of text, and Slack gives no easy way to collapse/hide it.
-- The `:brain:` reaction is enough of an "I'm working on this" UI. The rendering was suppressed first (#27), then the whole plumbing was ripped out: the adapters no longer capture `message.thinking`, `handleMessage` returns `{ text }` only, and the `OLLAMA_THINK` / `think` knob is gone. If you ever want it back, re-add the `think` param in `makeOllamaChat` and surface `result.thinking` from `handleMessage`.
+- The `:brain:` reaction is enough of an "I'm working on this" UI. The rendering was suppressed first (#27), then the whole plumbing was ripped out: the adapters no longer capture `message.thinking`, and `handleMessage` returns `{ text }` only. If you ever want the trace surfaced again, capture `response.message.thinking` in `makeOllamaChat` and thread it back through `handleMessage`.
+- **`makeOllamaChat` now passes `think: false` explicitly.** gemma4 (incl. the 26b-a4b default) defaults thinking ON, generating a long reasoning trace into `message.thinking` on *every* call — pure latency + token cost since we discard it. Measured on `gemma4:26b-a4b-it-qat`: a one-line reply was 157 eval tokens / 2.5s with thinking on vs 3 tokens / 0.4s with `think: false`. Leave it off unless you re-introduce trace rendering.
 
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 
