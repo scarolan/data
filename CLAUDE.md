@@ -163,7 +163,8 @@ These are practical, hard-earned notes about which Ollama models do what well, a
 
 ### gemma4:26b-a4b-it-qat (current default)
 - Same gemma4 family as `gemma4:31b` below, in an MoE shape: ~26B total params, ~4B active per token (`a4b`), instruction-tuned (`it`), quantization-aware-trained (`qat`). The draw is much lower active-param cost — faster responses and a smaller memory footprint than the 31B dense default — while staying in the family Data relies on for vision.
-- **Vision / tool calling: expected to match the family** (strong vision, broken structured tool calls) since it shares the gemma4 lineage, but this has NOT been verified live yet. Confirm vision quality in Slack before fully trusting it, and assume tools are still text-emitted (we don't use tools anyway — see "Why tool calling was removed").
+- **Vision: confirmed working live.** Fed a picture of Bender (Futurama) in Slack; Data accurately read the visual features — oversized cranial dome, articulated ocular lenses, titanium-alloy chassis — and correctly classified it as an autonomous robot. (It refused to recognize "Futurama" as canon, but that's world-knowledge/personality, not a vision miss.) Recognition is solid; on par with the family.
+- **Tool calling: assume still broken** (text-emitted, not structured `tool_calls`) since it shares the gemma4 lineage. Not retested — we don't use tools anyway (see "Why tool calling was removed").
 - If it underperforms the 31B on vision in practice, fall back by setting `OLLAMA_MODEL=gemma4:31b`.
 
 ### gemma4:31b (previous default)
