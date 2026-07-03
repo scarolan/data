@@ -80,8 +80,13 @@ test('IMAGE_REQUEST_GUIDANCE points at the /image slash command', () => {
 test('buildHelpText interpolates the bot name and lists key commands', () => {
   const help = buildHelpText('Data');
   assert.match(help, /@Data/);
+  assert.match(help, /i love you/);
+  assert.match(help, /open the pod bay door/);
   assert.match(help, /danceparty/);
+  assert.match(help, /tiktok/);
+  assert.match(help, /rickroll/);
   assert.match(help, /\/image/);
+  assert.match(help, /\/forget/);
   assert.match(help, /the rules/);
   assert.match(help, /dad joke/);
 });
