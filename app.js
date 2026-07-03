@@ -98,9 +98,42 @@ async function extractMessageImages(message, botToken) {
   return out;
 }
 
+// Shared chat-turn pipeline for both the DM handler and the @-mention handler.
+// Runs the common pre-flight guards (empty message, edits, image-request nudge)
+// then the react → extract-images → handleMessage → reply sequence. The only
+// things that differ between the two call sites are `say` (flat for DMs,
+// in-thread for mentions) and the error-log label, so both are injected.
+export async function runChatTurn({ message, say, deps, errorLabel }) {
+  const { app, chat, convoStore, botToken } = deps;
+
+  const hasText = message.text && message.text.trim() !== '';
+  const hasFiles = !!message.files?.length;
+  if (!hasText && !hasFiles) return;
+  if (message.edited) return;
+
+  if (isImageRequest(message.text)) {
+    await say(IMAGE_REQUEST_GUIDANCE);
+    return;
+  }
+
+  const reacted = await addThinkingReaction(app, message.channel, message.ts);
+  try {
+    const images = await extractMessageImages(message, botToken);
+    const result = await handleMessage({ ...message, images }, { chat, convoStore });
+    if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+    await say(result.text);
+  } catch (error) {
+    console.error(errorLabel, error);
+    if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+    await say(GENERIC_ERROR_TEXT);
+  }
+}
+
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
 export function registerHandlers(deps) {
-  const { app, chat, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
+  // `chat` is consumed inside runChatTurn (via `deps`); everything else is used
+  // directly by the handlers below.
+  const { app, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
 
   app.message(async ({ message, say, context }) => {
     if (!message) {
@@ -146,27 +179,12 @@ export function registerHandlers(deps) {
     const channelType = message.channel_type;
     if (channelType !== 'im' && channelType !== 'mpim') return;
 
-    const hasText = message.text && message.text.trim() !== '';
-    const hasFiles = !!message.files?.length;
-    if (!hasText && !hasFiles) return;
-    if (message.edited) return;
-
-    if (isImageRequest(message.text)) {
-      await say(IMAGE_REQUEST_GUIDANCE);
-      return;
-    }
-
-    const reacted = await addThinkingReaction(app, message.channel, message.ts);
-    try {
-      const images = await extractMessageImages(message, botToken);
-      const result = await handleMessage({ ...message, images }, { chat, convoStore });
-      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await say(result.text);
-    } catch (error) {
-      console.error(`Error in ${channelType} message processing:`, error);
-      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await say(GENERIC_ERROR_TEXT);
-    }
+    await runChatTurn({
+      message,
+      say,
+      deps,
+      errorLabel: `Error in ${channelType} message processing:`,
+    });
   });
 
   app.message(directMention(), async ({ message, say }) => {
@@ -219,27 +237,12 @@ export function registerHandlers(deps) {
       return;
     }
 
-    const hasText = message.text && message.text.trim() !== '';
-    const hasFiles = !!message.files?.length;
-    if (!hasText && !hasFiles) return;
-    if (message.edited) return;
-
-    if (isImageRequest(message.text)) {
-      await sayInThread(IMAGE_REQUEST_GUIDANCE);
-      return;
-    }
-
-    const reacted = await addThinkingReaction(app, message.channel, message.ts);
-    try {
-      const images = await extractMessageImages(message, botToken);
-      const result = await handleMessage({ ...message, images }, { chat, convoStore });
-      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await sayInThread(result.text);
-    } catch (error) {
-      console.error('Error in direct mention processing:', error);
-      if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-      await sayInThread(GENERIC_ERROR_TEXT);
-    }
+    await runChatTurn({
+      message,
+      say: sayInThread,
+      deps,
+      errorLabel: 'Error in direct mention processing:',
+    });
   });
 
   app.command('/image', async ({ command, ack, respond, client }) => {
