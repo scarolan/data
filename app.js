@@ -23,10 +23,12 @@ import {
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
+  isHelpRequest,
   isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
+  isTheRules,
   isTikTok,
 } from './lib/responses.js';
 
@@ -155,8 +157,17 @@ export function registerHandlers(deps) {
     }
 
     if (isPodBayDoor(message.text)) {
-      const userInfo = await app.client.users.info({ token: botToken, user: message.user });
-      const displayName = userInfo.user.profile.display_name || userInfo.user.real_name;
+      // This branch makes a live users.info call — the only canned response
+      // that does I/O. Guard it so a transient Slack API failure can't take
+      // down the handler with an unhandled rejection; fall back to HAL's
+      // canonical "Dave" so the gag still lands.
+      let displayName = 'Dave';
+      try {
+        const userInfo = await app.client.users.info({ token: botToken, user: message.user });
+        displayName = userInfo.user.profile.display_name || userInfo.user.real_name || displayName;
+      } catch (err) {
+        console.warn('pod bay: users.info failed, using fallback name:', err?.message || err);
+      }
       await say(formatPodBayResponse(displayName));
       return;
     }
@@ -206,12 +217,12 @@ export function registerHandlers(deps) {
       return say({ ...obj, thread_ts: threadTs });
     };
 
-    if (message.text && message.text.toLowerCase().includes('help')) {
+    if (isHelpRequest(message.text)) {
       await sayInThread(buildHelpText(botName));
       return;
     }
 
-    if (message.text && message.text.toLowerCase().includes('the rules')) {
+    if (isTheRules(message.text)) {
       await sayInThread(ASIMOV_RULES);
       return;
     }

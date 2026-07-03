@@ -135,6 +135,22 @@ test('handleMessage does not persist history when the backend errors', async () 
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
 });
 
+test('handleMessage does not persist or post an empty reply', async () => {
+  const convoStore = makeFakeConvoStore({
+    'convo:U1': [{ role: 'user', content: 'prior' }],
+  });
+  // Backend returns whitespace-only text (e.g. output was only stripped tokens).
+  const chat = makeFakeChat({ reply: '   ' });
+
+  const result = await handleMessage({ text: 'hi', user: 'U1' }, { chat, convoStore });
+
+  // User gets a real, non-empty apology (never say('')), and history is untouched.
+  assert.match(result.text, /unable to formulate a response/);
+  assert.notStrictEqual(result.text.trim(), '');
+  const stored = await convoStore.get('convo:U1');
+  assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
+});
+
 // --- clearHistory ---------------------------------------------------------
 
 test('clearHistory removes the stored history for a user', async () => {

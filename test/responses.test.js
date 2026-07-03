@@ -11,10 +11,12 @@ import {
   formatDadJoke,
   formatPodBayResponse,
   isDanceParty,
+  isHelpRequest,
   isImageRequest,
   isLoveYou,
   isPodBayDoor,
   isRickroll,
+  isTheRules,
   isTikTok,
 } from '../lib/responses.js';
 
@@ -71,6 +73,29 @@ test('isImageRequest catches several phrasings', () => {
   assert.ok(isImageRequest('generate an illustration of a sunset'));
   assert.ok(!isImageRequest('what is an image'));
   assert.ok(!isImageRequest(''));
+});
+
+test('isHelpRequest fires only when help is the whole command, not mid-sentence', () => {
+  // The command itself — with or without the mention token / punctuation.
+  assert.ok(isHelpRequest('help'));
+  assert.ok(isHelpRequest('  HELP '));
+  assert.ok(isHelpRequest('help!'));
+  assert.ok(isHelpRequest('<@U12345> help'));
+  // Must NOT hijack ordinary conversation that merely contains "help".
+  assert.ok(!isHelpRequest('<@U12345> can you help me debug this?'));
+  assert.ok(!isHelpRequest('that was really helpful, thanks'));
+  assert.ok(!isHelpRequest('helping hand'));
+  assert.ok(!isHelpRequest(''));
+  assert.ok(!isHelpRequest(undefined));
+});
+
+test('isTheRules matches the phrase as a word, mention-stripped', () => {
+  assert.ok(isTheRules('the rules'));
+  assert.ok(isTheRules('<@U12345> what are the rules?'));
+  assert.ok(!isTheRules('therules'));
+  assert.ok(!isTheRules('the ruleset is long'));
+  assert.ok(!isTheRules(''));
+  assert.ok(!isTheRules(undefined));
 });
 
 test('IMAGE_REQUEST_GUIDANCE points at the /image slash command', () => {
