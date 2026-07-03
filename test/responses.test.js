@@ -4,6 +4,7 @@ import assert from 'node:assert';
 import {
   ASIMOV_RULES,
   DANCE_PARTY_EMOJI,
+  GENERIC_ERROR_TEXT,
   IMAGE_REQUEST_GUIDANCE,
   buildDancePartyMessage,
   buildHelpText,
@@ -114,6 +115,11 @@ test('buildHelpText interpolates the bot name and lists key commands', () => {
   assert.match(help, /\/forget/);
   assert.match(help, /the rules/);
   assert.match(help, /dad joke/);
+});
+
+test('GENERIC_ERROR_TEXT is the single in-character error string', () => {
+  assert.match(GENERIC_ERROR_TEXT, /neural pathways/);
+  assert.ok(GENERIC_ERROR_TEXT.trim().length > 0);
 });
 
 test('ASIMOV_RULES contains all four laws', () => {

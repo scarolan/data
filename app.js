@@ -22,6 +22,7 @@ import {
   fetchDadJoke,
   formatDadJoke,
   formatPodBayResponse,
+  GENERIC_ERROR_TEXT,
   isDanceParty,
   isHelpRequest,
   isImageRequest,
@@ -33,9 +34,6 @@ import {
 } from './lib/responses.js';
 
 export { generateImage, handleMessage };
-
-const GENERIC_ERROR_TEXT =
-  'I apologize, but I am currently experiencing technical difficulties. My neural pathways appear to be experiencing a temporary malfunction. Please try again later.';
 
 const THINKING_REACTION = 'brain';
 
@@ -149,7 +147,9 @@ export function registerHandlers(deps) {
     // those through so vision uploads reach the LLM. All other subtypes
     // (edits, deletes, channel joins, etc.) are skipped.
     if (message.subtype && message.subtype !== 'file_share') return;
-    if (message.bot_id) return;
+    // Ignore bot-originated messages (prevents loops). Match the mention
+    // handler: some bot messages carry bot_profile but no bot_id.
+    if (message.bot_profile || message.bot_id) return;
 
     if (isLoveYou(message.text)) {
       await say('I know.');
