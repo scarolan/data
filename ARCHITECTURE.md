@@ -11,9 +11,9 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 - app.js — single entrypoint. Creates the Bolt `App`, registers event handlers, and wires third-party clients.
 - Slack (Bolt JS) — receives events in socket mode and invokes the handlers in `app.message(...)` and `app.command(...)`.
 - ChatGPT client (`chatgpt` ChatGPTAPI) — used for conversational responses with a persistent message store.
-- Persistence (Keyv + KeyvRedis) — stores conversation state (parent message ids) and is backed by Redis when `REDIS_URL` is provided.
+- Persistence (Keyv + KeyvRedis) — stores ChatGPT message history in Redis, defaulting to `redis://localhost:6379` unless `REDIS_URL` is set.
 - OpenAI (official SDK) — used for image generation (model: `gpt-image-1`) via `openaiClient.images.generate()`.
-- Upload flow — preferrs Slack `files.uploadV2()` and falls back to `files.upload()` when needed.
+- Upload flow — prefers Slack `files.uploadV2()` and falls back to `files.upload()` when needed.
 - Tests — minimal tests live in `test/package.test.js` and run with Node's built-in test runner.
 - CI — GitHub Actions workflow runs install, lint, tests, and a node syntax check.
 
@@ -21,10 +21,10 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 
 1. Incoming message arrives via Bolt socket mode.
 2. Handlers in `app.message(...)` run:
-   - General messages (hubot-style): simple pattern matches (danceparty, rickroll, etc.).
+   - General messages (hubot-style): simple pattern matches (`i love you`, `open the pod bay door`, `danceparty`, `tiktok`, `rickroll`).
    - DM (`message.channel_type === 'im'`): forwarded to `handleMessage()` which calls ChatGPT; a "thinking" message is posted while processing.
    - MPIM: same as DM, but for multi-party DMs.
-   - Direct mentions (using `directMention()`): shows help, special commands, or forwards to ChatGPT with the same thinking UX.
+   - Direct mentions (using `directMention()`): handles `help`, `the rules`, and `dad joke`, or forwards to ChatGPT with the same thinking UX.
 3. Slash command `/dalle`:
    - Immediately `ack()` the command to avoid Slack timeouts.
    - Respond with an ephemeral progress message.
@@ -35,7 +35,8 @@ This document explains the high-level architecture of the `data` Slack chatbot a
 - A small thinking helper (`postThinking` / `clearThinking`) centralizes posting & deleting progress messages.
 
 ## Persistence & Conversation Context
-- The bot stores parent message ids per user in `Keyv` (backed by `KeyvRedis` when `REDIS_URL` is set) so follow-up messages stay in conversation context.
+- ChatGPT message history is stored via `Keyv` backed by `KeyvRedis`.
+- The active `parentMessageId` pointer used for follow-up replies is also tracked in an in-memory `Map`, keyed by Slack user id.
 - TTL and advisory `max` keys are configurable via `MEMORY_TTL_HOURS` and `MEMORY_MAX_KEYS`.
 
 ## Error handling & observability

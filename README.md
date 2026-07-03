@@ -4,7 +4,7 @@
 
 ## Overview
 
-This is a ChatGPT-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to ChatGPT for messages that don't match a predefined pattern. You can customize the bot's personality and responses to suit your needs.
+This is a ChatGPT-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses, direct-message and mention-based ChatGPT replies, and a `/dalle` slash command for image generation. You can customize the bot's personality and thinking indicator with environment variables.
 
 ## Prerequisites
 
@@ -92,19 +92,34 @@ npm run start
 
 ### 4. Test
 
-Go to the installed workspace and type **help** in a DM to your new bot.
-Use the `/dalle` slash command for functionality:
+Try the bot in Slack with one of these examples.
 
-Direct mention example (in a channel or DM):
+Direct mention example:
 
 ```text
 @Data help
+```
+
+Direct message example:
+
+```text
+What is the capital of Australia?
 ```
 
 Slash command example (image generation):
 
 ```text
 /dalle An image of Lt. Commander Data and his cat
+```
+
+Trigger word examples that work without mentioning the bot:
+
+```text
+i love you
+open the pod bay door
+danceparty
+rickroll
+tiktok
 ```
 
 ### 5. Deploy to production
@@ -115,7 +130,7 @@ You'll need a Linux server, container, or application platform that supports nod
 
 The bot supports generating images with DALL-E through the `/dalle` slash command.
 
-Note: The older direct `@Data image ...` handler was removed to simplify the codebase. Please use `/dalle` for image generation.
+If you ask the bot to create an image in a DM or direct mention, it will guide you to use `/dalle` instead.
 
 ### How Image Generation Works
 
@@ -124,6 +139,33 @@ When using the `/dalle` slash command:
 1. The bot acknowledges your request and shows a "generating" message
 2. Image generation happens asynchronously in the background
 3. When complete, the image is posted directly to the channel
+
+## Supported interactions
+
+### Trigger words
+
+These work in channels without mentioning the bot:
+
+- `i love you`
+- `open the pod bay door`
+- `danceparty`
+- `tiktok`
+- `rickroll`
+
+### Direct mentions
+
+These special direct-mention commands are handled before ChatGPT:
+
+- `@Data help`
+- `@Data the rules`
+- `@Data dad joke`
+
+All other direct mentions fall back to ChatGPT.
+
+### Direct messages and MPIMs
+
+- Non-empty user messages fall back to ChatGPT
+- Requests to generate images in chat are redirected to `/dalle`
 
 ## Environment Variables
 
@@ -135,4 +177,6 @@ When using the `/dalle` slash command:
 | OPENAI_API_KEY      | Yes      | Your OpenAI API key                                |
 | BOT_PERSONALITY     | No       | Custom personality prompt for your bot             |
 | THINKING_MESSAGE    | No       | Custom thinking indicator message                  |
-| REDIS_URL           | No       | Custom Redis URL (default: redis://localhost:6379) |
+| REDIS_URL           | No       | Redis URL (defaults to `redis://localhost:6379`)   |
+| MEMORY_TTL_HOURS    | No       | Conversation-store TTL in hours (default: `24`)    |
+| MEMORY_MAX_KEYS     | No       | Advisory maximum stored keys (default: `10000`)    |
