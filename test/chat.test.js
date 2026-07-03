@@ -135,6 +135,59 @@ test('handleMessage does not persist history when the backend errors', async () 
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
 });
 
+test('handleMessage serializes concurrent turns from the same user (no lost writes)', async () => {
+  const convoStore = makeFakeConvoStore();
+  // A chat that yields across microtasks so a naive read-modify-write would
+  // interleave: both calls would read empty history and the second set() would
+  // clobber the first turn, leaving only 2 entries instead of 4.
+  const chat = {
+    calls: [],
+    async chat({ messages }) {
+      this.calls.push(messages.map((m) => m.content));
+      await Promise.resolve();
+      await Promise.resolve();
+      return { text: 'ok' };
+    },
+  };
+
+  // Fired together; Promise.all evaluates the array left-to-right, so 'first'
+  // acquires the lock before 'second'.
+  await Promise.all([
+    handleMessage({ text: 'first', user: 'U1' }, { chat, convoStore }),
+    handleMessage({ text: 'second', user: 'U1' }, { chat, convoStore }),
+  ]);
+
+  const stored = await convoStore.get('convo:U1');
+  assert.strictEqual(stored.length, 4);
+  assert.deepStrictEqual(
+    stored.map((m) => m.content),
+    ['first', 'ok', 'second', 'ok']
+  );
+  // The second turn saw the first turn's history when it ran.
+  assert.deepStrictEqual(chat.calls[1], ['first', 'ok', 'second']);
+});
+
+test('looksLikeContentError classifies policy errors but not infra errors', async () => {
+  // Policy/safety failures → ask the user to rephrase.
+  for (const m of ['blocked by safety filters', 'content policy violation', 'PROHIBITED content']) {
+    const chat = makeFakeChat({ shouldThrow: new Error(m) });
+    const result = await handleMessage(
+      { text: 'hi', user: 'U1' },
+      { chat, convoStore: makeFakeConvoStore() }
+    );
+    assert.match(result.text, /rephrase your request/, `expected rephrase for: ${m}`);
+  }
+  // Plain infrastructure errors → generic apology, NOT a rephrase nudge.
+  for (const m of ['unexpected content-type: text/html', 'content-length mismatch', 'ECONNRESET']) {
+    const chat = makeFakeChat({ shouldThrow: new Error(m) });
+    const result = await handleMessage(
+      { text: 'hi', user: 'U1' },
+      { chat, convoStore: makeFakeConvoStore() }
+    );
+    assert.match(result.text, /neural pathways/, `expected generic apology for: ${m}`);
+  }
+});
+
 test('handleMessage does not persist or post an empty reply', async () => {
   const convoStore = makeFakeConvoStore({
     'convo:U1': [{ role: 'user', content: 'prior' }],
