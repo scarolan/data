@@ -72,6 +72,7 @@ test('isImageRequest catches several phrasings', () => {
   assert.ok(isImageRequest('can you create an image of a cat'));
   assert.ok(isImageRequest('please draw me a picture'));
   assert.ok(isImageRequest('generate an illustration of a sunset'));
+  assert.ok(!isImageRequest(`please make ${'draw '.repeat(250)}this eventually become an image`));
   assert.ok(!isImageRequest('what is an image'));
   assert.ok(!isImageRequest(''));
 });
