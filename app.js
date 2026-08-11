@@ -370,7 +370,7 @@ export async function start(deps = buildDeps()) {
 
   registerHandlers(deps);
   await deps.app.start(process.env.PORT || 3000);
-  console.log(`${deps.botName} is alive!`);
+  console.log('Bot is alive!');
 }
 
 // Only boot the bot when this module is run directly. This is what lets the
