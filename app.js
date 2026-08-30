@@ -38,6 +38,12 @@ export { generateImage, handleMessage };
 
 const THINKING_REACTION = 'brain';
 
+// Slack's ChatStreamer default buffer is 256 chars, which makes short replies
+// appear all at once at stop() — streaming happens but is invisible. Flush
+// smaller chunks so the reply visibly types out. chat.appendStream is
+// rate-limit Tier 4 (100+/min), so even a long reply stays comfortably inside.
+const STREAM_BUFFER_SIZE = 64;
+
 // Add a :brain: reaction to the user's message to signal Data is processing.
 // Returns true if the reaction landed (so caller can remove it on reply).
 async function addThinkingReaction(app, channel, ts) {
@@ -259,14 +265,18 @@ export function registerHandlers(deps) {
       say,
       deps,
       errorLabel: `Error in ${channelType} message processing:`,
-      // Stream the reply flat (no thread_ts) to keep DM replies unthreaded.
-      // If the workspace rejects flat streaming, the sink falls back to say().
+      // Slack only streams into threads (startStream without thread_ts fails
+      // with invalid_thread_ts — verified live), so DM streams are rooted at
+      // the user's message; replies inside that thread keep streaming there.
+      // If Slack still refuses, the sink falls back to a flat say().
       streamFactory: deps.streamReplies
         ? () =>
             client.chatStream({
               channel: message.channel,
+              thread_ts: message.thread_ts || message.ts,
               recipient_team_id: context.teamId ?? context.enterpriseId,
               recipient_user_id: context.userId,
+              buffer_size: STREAM_BUFFER_SIZE,
             })
         : null,
     });
@@ -329,7 +339,10 @@ export function registerHandlers(deps) {
       errorLabel: 'Error in direct mention processing:',
       // Bolt's sayStream targets thread_ts ?? ts — the same thread sayInThread
       // replies into — so streamed and non-streamed replies land in one place.
-      streamFactory: deps.streamReplies && sayStream ? () => sayStream() : null,
+      streamFactory:
+        deps.streamReplies && sayStream
+          ? () => sayStream({ buffer_size: STREAM_BUFFER_SIZE })
+          : null,
     });
   });
 
