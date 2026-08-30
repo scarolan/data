@@ -135,19 +135,19 @@ When using the `/image` slash command:
 
 ## Environment Variables
 
-| Variable            | Required        | Description                                                          |
-| ------------------- | --------------- | -------------------------------------------------------------------- |
-| SLACK_BOT_TOKEN     | Yes             | Your Slack bot token from the OAuth section                          |
-| SLACK_APP_TOKEN     | Yes             | Your Slack app-level token (Socket Mode)                             |
-| SLACK_BOT_USER_NAME | Yes             | Must match the short name of your bot user                           |
-| GEMINI_API_KEY      | Yes             | Used for `/image`; also for chat when `CHAT_BACKEND=gemini`          |
-| CHAT_BACKEND        | No              | `ollama` (default) or `gemini`                                       |
-| OLLAMA_HOST         | No              | Ollama endpoint (default: `http://localhost:11434`)                  |
-| OLLAMA_MODEL        | No              | Ollama chat model (default: `gemma4:26b-a4b-it-qat`)                 |
-| GEMINI_CHAT_MODEL   | No              | Gemini chat model (default: `gemini-3-flash-latest`)                 |
-| GEMINI_IMAGE_MODEL  | No              | Override the default image model                                     |
-| BOT_PERSONALITY     | No              | Custom personality prompt for your bot                               |
-| REDIS_URL           | No              | Custom Redis URL (default: `redis://localhost:6379`)                 |
-| MEMORY_TTL_HOURS    | No              | Conversation memory lifetime in hours (default: 24)                  |
+| Variable            | Required | Description                                                 |
+| ------------------- | -------- | ----------------------------------------------------------- |
+| SLACK_BOT_TOKEN     | Yes      | Your Slack bot token from the OAuth section                 |
+| SLACK_APP_TOKEN     | Yes      | Your Slack app-level token (Socket Mode)                    |
+| SLACK_BOT_USER_NAME | Yes      | Must match the short name of your bot user                  |
+| GEMINI_API_KEY      | Yes      | Used for `/image`; also for chat when `CHAT_BACKEND=gemini` |
+| CHAT_BACKEND        | No       | `ollama` (default) or `gemini`                              |
+| OLLAMA_HOST         | No       | Ollama endpoint (default: `http://localhost:11434`)         |
+| OLLAMA_MODEL        | No       | Ollama chat model (default: `gemma4:26b-a4b-it-qat`)        |
+| GEMINI_CHAT_MODEL   | No       | Gemini chat model (default: `gemini-3-flash-latest`)        |
+| GEMINI_IMAGE_MODEL  | No       | Override the default image model                            |
+| BOT_PERSONALITY     | No       | Custom personality prompt for your bot                      |
+| REDIS_URL           | No       | Custom Redis URL (default: `redis://localhost:6379`)        |
+| MEMORY_TTL_HOURS    | No       | Conversation memory lifetime in hours (default: 24)         |
 
 See `.env.example` for a copy-pasteable template.

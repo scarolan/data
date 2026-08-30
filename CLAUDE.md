@@ -54,29 +54,29 @@ AGENTS.md                  # Conventions for AI agents working in this repo
 
 `app.js` only boots the bot when run as the main module (`import.meta.url === \`file://${process.argv[1]}\``); importing it from tests is safe. It re-exports the unit-testable functions from `lib/`:
 
-| Export | Source | Purpose |
-|--------|--------|---------|
-| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js` | Route Slack message through the chat adapter; returns `{ text }` |
-| `clearHistory(userId, { convoStore })` | `lib/chat.js` | Delete a user's stored conversation history (backs `/forget`) |
-| `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer` |
-| `registerHandlers(deps)` | `app.js` | Attach all Bolt listeners to `deps.app` |
-| `start(deps)` | `app.js` | Wire signals + register handlers + `app.start()` |
+| Export                                     | Source         | Purpose                                                          |
+| ------------------------------------------ | -------------- | ---------------------------------------------------------------- |
+| `handleMessage(msg, { chat, convoStore })` | `lib/chat.js`  | Route Slack message through the chat adapter; returns `{ text }` |
+| `clearHistory(userId, { convoStore })`     | `lib/chat.js`  | Delete a user's stored conversation history (backs `/forget`)    |
+| `generateImage(prompt, { client, model })` | `lib/image.js` | Call Gemini and return a PNG `Buffer`                            |
+| `registerHandlers(deps)`                   | `app.js`       | Attach all Bolt listeners to `deps.app`                          |
+| `start(deps)`                              | `app.js`       | Wire signals + register handlers + `app.start()`                 |
 
 ## Chat backends
 
 `lib/chat-backends.js` exposes two factories that each return an object with a uniform `chat({ messages }) → { text }` method. `handleMessage` only ever calls this method — it has no idea which provider it's talking to.
 
-| Backend | SDK | Model env | Notes |
-|---------|-----|-----------|-------|
-| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `gemma4:26b-a4b-it-qat`) | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `tools`, `format`, vision. |
-| `gemini` | `@google/genai` | `GEMINI_CHAT_MODEL` (default `gemini-3-flash-latest`) | Reuses the same client as image generation. Translates roles (`assistant` → `model`) and lifts the system message into `config.systemInstruction`. |
+| Backend            | SDK                  | Model env                                             | Notes                                                                                                                                              |
+| ------------------ | -------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ollama` (default) | `ollama` npm package | `OLLAMA_MODEL` (default `gemma4:26b-a4b-it-qat`)      | Talks to `OLLAMA_HOST`. Strips Llama tokenizer artifacts. Room to extend with `tools`, `format`, vision.                                           |
+| `gemini`           | `@google/genai`      | `GEMINI_CHAT_MODEL` (default `gemini-3-flash-latest`) | Reuses the same client as image generation. Translates roles (`assistant` → `model`) and lifts the system message into `config.systemInstruction`. |
 
 Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at adapter construction time, not passed per call.
 
 ## Message Handlers
 
 1. **General messages** (`app.message()`) — DMs, channel messages, MPIM
-2. **Direct mentions** (`app.message(directMention())`) — `@Data` mentions
+2. **Direct mentions** (`app.message(directMention)`) — `@Data` mentions
 3. **Slash commands**
    - `app.command('/image')` — Image generation via Gemini
    - `app.command('/forget')` — Wipe the invoking user's conversation history (calls `clearHistory`)
@@ -86,12 +86,14 @@ Pick the backend with `CHAT_BACKEND=ollama|gemini`. System message is bound at a
 Loaded from `.env` via dotenv (see `.env.example`).
 
 **Required:**
+
 - `SLACK_BOT_TOKEN` — Bot OAuth token (`xoxb-...`)
 - `SLACK_APP_TOKEN` — App-level token for Socket Mode (`xapp-...`)
 - `SLACK_BOT_USER_NAME` — Bot's display name in Slack
 - `GEMINI_API_KEY` — required for the `/image` slash command, and for chat when `CHAT_BACKEND=gemini`
 
 **Optional:**
+
 - `CHAT_BACKEND` — `ollama` (default) or `gemini`
 - `OLLAMA_HOST` — Ollama endpoint (default: `http://localhost:11434`)
 - `OLLAMA_MODEL` — Ollama chat model (default: `gemma4:26b-a4b-it-qat`)
@@ -162,26 +164,31 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 These are practical, hard-earned notes about which Ollama models do what well, and what's worth knowing when picking `OLLAMA_MODEL`. Save your future self a debugging session.
 
 ### gemma4:26b-a4b-it-qat (current default)
+
 - Same gemma4 family as `gemma4:31b` below, in an MoE shape: ~26B total params, ~4B active per token (`a4b`), instruction-tuned (`it`), quantization-aware-trained (`qat`). The draw is much lower active-param cost — faster responses and a smaller memory footprint than the 31B dense default — while staying in the family Data relies on for vision.
 - **Vision: confirmed working live.** Fed a picture of Bender (Futurama) in Slack; Data accurately read the visual features — oversized cranial dome, articulated ocular lenses, titanium-alloy chassis — and correctly classified it as an autonomous robot. (It refused to recognize "Futurama" as canon, but that's world-knowledge/personality, not a vision miss.) Recognition is solid; on par with the family.
 - **Tool calling: assume still broken** (text-emitted, not structured `tool_calls`) since it shares the gemma4 lineage. Not retested — we don't use tools anyway (see "Why tool calling was removed").
 - If it underperforms the 31B on vision in practice, fall back by setting `OLLAMA_MODEL=gemma4:31b`.
 
 ### gemma4:31b (previous default)
+
 - **Vision: excellent.** Identified a "communist cat meme" correctly including the hammer-and-sickle symbolism and explained the joke premise unprompted. Strong recognition + sophisticated comprehension.
 - **Tool calling: broken.** Knows what tools are, knows their schemas, but emits calls as plain text — e.g. `<call:generate_image{prompt:"..."}><tool_call|>` — instead of populating Ollama's structured `message.tool_calls` field. Wire-format / template issue, not a prompting issue. Same behavior on `gemma4-openhands:latest` (the agent fine-tune of the same family), so it's a family-wide limitation, not a base-model thing.
 - **Thinking: emits `message.thinking` even when `think:` param is NOT sent.** Found this the hard way when an inline thinking block appeared in Slack with no thinking knob enabled. (The thinking plumbing has since been removed entirely — see "Why thinking-trace rendering was removed" below.)
 - Verdict: use for chat + vision. Don't try to use it for tools.
 
 ### qwen3.6:27b
+
 - **Tool calling: reliable.** Tested against `generate_image` and a 7-tool registry; structured `tool_calls` came back cleanly with rich, well-formed args.
 - **Vision: not confirmed.** Likely no (Qwen vision is a separate `qwen2.5-vl` family). Didn't test live.
 - Verdict: pick this when tools matter and vision doesn't.
 
 ### What's pulled on `kepler.local`
+
 As of this writing: `gemma4:26b-a4b-it-qat` (current default), `gemma4:latest`, `gemma4:31b`, `gemma4-openhands:latest`, `llama3.3:70b-instruct-q8_0` (75GB, slow), `qwen3.6:27b`, `qwen3.6-openhands:latest`, `qwen3.6:35b-a3b`, `qwen3-coder-next:latest`, `qwen3-coder-openhands:latest`, `devstral-small-2:latest`, `nomic-embed-text:latest`. None of these are vision+tools-in-one. If you ever want both natively, pull something like `qwen2.5-vl:32b` or `mistral-small3.1` and try.
 
 ### Why tool calling was removed
+
 1. **6 of 7 tools duplicated regex matchers** (`tell_dad_joke`, `state_asimovs_laws`, `show_help`, `start_dance_party`, `play_rickroll`, `play_tiktok`) — slower and less reliable than the existing exact-phrase triggers.
 2. The one tool that did benefit from LLM intent extraction (`generate_image`) was unreliable on gemma — and gemma is the right model for everything else.
 3. `/image` slash command already covers image generation reliably with no LLM round-trip.
@@ -190,20 +197,23 @@ As of this writing: `gemma4:26b-a4b-it-qat` (current default), `gemma4:latest`, 
 If you ever bring tools back: make sure the model in production actually emits structured `tool_calls` before you wire it up. Test live against a 2-tool registry first.
 
 ### Lessons from shipping vision (#26)
+
 - Slack tags file uploads with `subtype: 'file_share'`. The pre-#26 handler had `if (message.subtype) return;` which silently dropped every upload. Fix: allow `file_share` through, skip only the genuinely-noise subtypes.
 - Image fetch needs the bot token as a bearer header against `file.url_private` — these aren't anonymous URLs.
 - Don't persist image bytes to convoStore. The Slack URLs expire and the bytes are big. Persist only the text portion of the user turn.
 - Add explicit log lines around vision (`Vision: extracted ...`, `Ollama chat -> model with N image(s)`). When the pipeline silently dropped uploads pre-fix, we had NO observability — the bot just looked broken.
 
 ### Lessons from shipping reactions UX (#28)
+
 - Requires `reactions:read` and `reactions:write` scopes in `manifest.yaml`.
 - After adding scopes, you MUST re-sync the manifest in api.slack.com AND reinstall the app to the workspace. Failure mode: `missing_scope` errors on every `reactions.add` call, no reaction ever appears, bot looks unresponsive while it's actually working fine.
 
 ### Why thinking-trace rendering was removed (#27)
-- gemma4 emits `message.thinking` even without `think:` set, and the traces are *long* (full chain-of-thought paragraphs).
+
+- gemma4 emits `message.thinking` even without `think:` set, and the traces are _long_ (full chain-of-thought paragraphs).
 - The inline Block Kit rendering — italicized "Thinking: …" context block above the reply — made every message a wall of text, and Slack gives no easy way to collapse/hide it.
 - The `:brain:` reaction is enough of an "I'm working on this" UI. The rendering was suppressed first (#27), then the whole plumbing was ripped out: the adapters no longer capture `message.thinking`, and `handleMessage` returns `{ text }` only. If you ever want the trace surfaced again, capture `response.message.thinking` in `makeOllamaChat` and thread it back through `handleMessage`.
-- **`makeOllamaChat` now passes `think: false` explicitly.** gemma4 (incl. the 26b-a4b default) defaults thinking ON, generating a long reasoning trace into `message.thinking` on *every* call — pure latency + token cost since we discard it. Measured on `gemma4:26b-a4b-it-qat`: a one-line reply was 157 eval tokens / 2.5s with thinking on vs 3 tokens / 0.4s with `think: false`. Leave it off unless you re-introduce trace rendering.
+- **`makeOllamaChat` now passes `think: false` explicitly.** gemma4 (incl. the 26b-a4b default) defaults thinking ON, generating a long reasoning trace into `message.thinking` on _every_ call — pure latency + token cost since we discard it. Measured on `gemma4:26b-a4b-it-qat`: a one-line reply was 157 eval tokens / 2.5s with thinking on vs 3 tokens / 0.4s with `think: false`. Leave it off unless you re-introduce trace rendering.
 
 **Adding a new slash command:** Register with `app.command('/commandname')` inside `registerHandlers()` in `app.js`, and add the entry to `manifest.yaml`. Remember to re-sync the manifest to the Slack app and reinstall before Slack will route the new command.
 

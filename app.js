@@ -5,9 +5,10 @@
 // matched in lib/responses.js.
 ///////////////////////////////////////////////////////////////
 
-import 'dotenv/config';
+import dotenv from 'dotenv';
 import { directMention } from '@slack/bolt';
-import fetch from 'node-fetch';
+
+dotenv.config({ quiet: true });
 
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
 import { handleMessage, clearHistory } from './lib/chat.js';
@@ -198,7 +199,7 @@ export function registerHandlers(deps) {
     });
   });
 
-  app.message(directMention(), async ({ message, say }) => {
+  app.message(directMention, async ({ message, say }) => {
     if (!message) return;
     // Slack tags messages with attached files as subtype 'file_share' — let
     // those through so vision uploads reach the LLM. All other subtypes

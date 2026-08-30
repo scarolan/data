@@ -7,8 +7,8 @@
   "scripts": {
     "start": "node app.js",
     "test": "node --test",
-    "lint": "eslint . --ext .js --max-warnings 0",
-    "lint:fix": "eslint . --ext .js --fix",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write ."
   },
   "repository": {
@@ -20,18 +20,19 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@google/genai": "^2.8.0",
-    "@keyv/redis": "^5.1.1",
-    "@slack/bolt": "^3.17.1",
-    "dotenv": "^16.4.5",
-    "keyv": "^5.5.0",
-    "node-fetch": "^3.3.2",
+    "@google/genai": "^2.19.0",
+    "@keyv/redis": "^5.1.6",
+    "@slack/bolt": "^5.0.0",
+    "dotenv": "^17.4.2",
+    "keyv": "^5.6.0",
     "ollama": "^0.6.3"
   },
   "devDependencies": {
-    "eslint": "^8.45.0",
-    "eslint-config-prettier": "^8.8.0",
-    "eslint-plugin-prettier": "^4.1.0",
-    "prettier": "^2.8.8"
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "globals": "^17.11.0",
+    "prettier": "^3.9.6"
   }
 }
