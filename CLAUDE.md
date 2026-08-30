@@ -155,7 +155,7 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 - `"help"` (when @-mentioned) → command list
 - `"the rules"` (when @-mentioned) → Asimov's laws
 - `"dad joke"` (when @-mentioned) → fetched from icanhazdadjoke.com
-- `"summarize this thread"` / `"tl;dr"` (when @-mentioned) → LLM briefing of the current thread (`lib/summarize.js` — regex-triggered like the canned responses, but the reply itself is one LLM call; fetches via `conversations.replies`, resolves names via `users.info`, streams in-thread, bypasses convoStore)
+- `"summarize this thread"` / `"tl;dr"` (when @-mentioned; no mention needed in DMs/MPIMs) → LLM briefing of the current thread (`lib/summarize.js` — regex-triggered like the canned responses, but the reply itself is one LLM call; fetches via `conversations.replies`, resolves names via `users.info`, streams in-thread, bypasses convoStore). Inside a thread, any short message starting with summarize/summarise/summary also triggers (`isBareSummaryRequest`, ≤40 chars — tolerates typos like "thrad"); outside a thread, `THREAD_SUMMARY_GUIDANCE` explains the usage instead of letting the LLM improvise.
 
 ## Testing
 

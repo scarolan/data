@@ -30,10 +30,12 @@ import {
   isImageRequest,
   isLoveYou,
   isPodBayDoor,
+  isBareSummaryRequest,
   isRickroll,
   isTheRules,
   isThreadSummaryRequest,
   isTikTok,
+  THREAD_SUMMARY_GUIDANCE,
 } from './lib/responses.js';
 
 export { generateImage, handleMessage };
@@ -194,6 +196,33 @@ export async function runChatTurn({ message, say, deps, errorLabel, streamFactor
   }
 }
 
+// Shared "summarize this thread" turn for the @-mention handler and the bare
+// DM/MPIM form. Wraps summarizeThread with the same reaction + stream-or-say
+// delivery UX as a chat turn. `say` must already target the thread.
+export async function runThreadSummary({ message, deps, client, context, say, streamFactory }) {
+  const { app, chat, botName } = deps;
+  const reacted = await addThinkingReaction(app, message.channel, message.ts);
+  const sink = streamFactory ? makeStreamSink(streamFactory) : null;
+  try {
+    const result = await summarizeThread({
+      client,
+      chat,
+      channel: message.channel,
+      threadTs: message.thread_ts || message.ts,
+      triggerTs: message.ts,
+      botUserId: context.botUserId,
+      botName,
+      ...(sink ? { onDelta: (delta) => sink.push(delta) } : {}),
+    });
+    if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+    await deliverReply({ sink, result, say });
+  } catch (error) {
+    console.error('Error in thread summarization:', error);
+    if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+    await say(GENERIC_ERROR_TEXT);
+  }
+}
+
 // Land a { text, streamed } result in Slack. If reply content went through the
 // stream, finalize it — appending the text as a trailer when it's a fallback
 // (error/empty mid-stream) the stream never saw, so a partial message still
@@ -268,6 +297,43 @@ export function registerHandlers(deps) {
     const channelType = message.channel_type;
     if (channelType !== 'im' && channelType !== 'mpim') return;
 
+    // Thread summaries work without an @-mention in DMs/MPIMs, where the bot
+    // is the conversational partner: "summarize this thread" anywhere, or any
+    // short summarize-shaped message (typos included) from inside a thread.
+    // Outside a thread there is nothing to summarize — canned guidance beats
+    // letting the LLM improvise a refusal.
+    if (
+      isThreadSummaryRequest(message.text) ||
+      (message.thread_ts && isBareSummaryRequest(message.text))
+    ) {
+      if (!message.thread_ts) {
+        await say(THREAD_SUMMARY_GUIDANCE);
+        return;
+      }
+      const sayInThread = (payload) => {
+        const obj = typeof payload === 'string' ? { text: payload } : payload;
+        return say({ ...obj, thread_ts: message.thread_ts });
+      };
+      await runThreadSummary({
+        message,
+        deps,
+        client,
+        context,
+        say: sayInThread,
+        streamFactory: deps.streamReplies
+          ? () =>
+              client.chatStream({
+                channel: message.channel,
+                thread_ts: message.thread_ts,
+                recipient_team_id: context.teamId ?? context.enterpriseId,
+                recipient_user_id: context.userId,
+                buffer_size: STREAM_BUFFER_SIZE,
+              })
+          : null,
+      });
+      return;
+    }
+
     await runChatTurn({
       message,
       say,
@@ -340,30 +406,21 @@ export function registerHandlers(deps) {
       return;
     }
 
-    if (isThreadSummaryRequest(message.text)) {
-      const reacted = await addThinkingReaction(app, message.channel, message.ts);
-      const sink =
-        deps.streamReplies && sayStream
-          ? makeStreamSink(() => sayStream({ buffer_size: STREAM_BUFFER_SIZE }))
-          : null;
-      try {
-        const result = await summarizeThread({
-          client,
-          chat: deps.chat,
-          channel: message.channel,
-          threadTs,
-          triggerTs: message.ts,
-          botUserId: context.botUserId,
-          botName,
-          ...(sink ? { onDelta: (delta) => sink.push(delta) } : {}),
-        });
-        if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-        await deliverReply({ sink, result, say: sayInThread });
-      } catch (error) {
-        console.error('Error in thread summarization:', error);
-        if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-        await sayInThread(GENERIC_ERROR_TEXT);
-      }
+    if (
+      isThreadSummaryRequest(message.text) ||
+      (message.thread_ts && isBareSummaryRequest(message.text))
+    ) {
+      await runThreadSummary({
+        message,
+        deps,
+        client,
+        context,
+        say: sayInThread,
+        streamFactory:
+          deps.streamReplies && sayStream
+            ? () => sayStream({ buffer_size: STREAM_BUFFER_SIZE })
+            : null,
+      });
       return;
     }
 

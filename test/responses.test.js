@@ -18,8 +18,10 @@ import {
   isPodBayDoor,
   isRickroll,
   isTheRules,
+  isBareSummaryRequest,
   isThreadSummaryRequest,
   isTikTok,
+  THREAD_SUMMARY_GUIDANCE,
 } from '../lib/responses.js';
 
 test('isLoveYou matches phrases case-insensitively', () => {
@@ -112,6 +114,27 @@ test('isThreadSummaryRequest matches summary phrasings, mention-stripped', () =>
   assert.ok(isThreadSummaryRequest('give me a thread summary'));
   assert.ok(isThreadSummaryRequest('<@U12345> tl;dr'));
   assert.ok(isThreadSummaryRequest('TLDR'));
+});
+
+test('isBareSummaryRequest matches short summarize-shaped commands, typos included', () => {
+  assert.ok(isBareSummaryRequest('summarize'));
+  assert.ok(isBareSummaryRequest('Summarize this'));
+  assert.ok(isBareSummaryRequest('summarize this thrad.')); // the typo that inspired this
+  assert.ok(isBareSummaryRequest('<@U12345> summarise it please'));
+  assert.ok(isBareSummaryRequest('summary please'));
+});
+
+test('isBareSummaryRequest leaves real analytical requests to the LLM', () => {
+  assert.ok(!isBareSummaryRequest('summarize the pros and cons of Redis versus Memcached'));
+  assert.ok(!isBareSummaryRequest('can you summarize this?')); // does not start with it
+  assert.ok(!isBareSummaryRequest('summarily dismissed'));
+  assert.ok(!isBareSummaryRequest(''));
+  assert.ok(!isBareSummaryRequest(undefined));
+});
+
+test('THREAD_SUMMARY_GUIDANCE tells the user how to invoke a summary', () => {
+  assert.match(THREAD_SUMMARY_GUIDANCE, /summarize this thread/);
+  assert.match(THREAD_SUMMARY_GUIDANCE, /tl;dr/);
 });
 
 test('isThreadSummaryRequest ignores non-commands and unbounded input', () => {
