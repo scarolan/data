@@ -18,6 +18,7 @@ import {
   isPodBayDoor,
   isRickroll,
   isTheRules,
+  isThreadSummaryRequest,
   isTikTok,
 } from '../lib/responses.js';
 
@@ -104,6 +105,24 @@ test('IMAGE_REQUEST_GUIDANCE points at the /image slash command', () => {
   assert.match(IMAGE_REQUEST_GUIDANCE, /\/image/);
 });
 
+test('isThreadSummaryRequest matches summary phrasings, mention-stripped', () => {
+  assert.ok(isThreadSummaryRequest('<@U12345> summarize this thread'));
+  assert.ok(isThreadSummaryRequest('please summarise the thread'));
+  assert.ok(isThreadSummaryRequest('can I get a summary of this thread?'));
+  assert.ok(isThreadSummaryRequest('give me a thread summary'));
+  assert.ok(isThreadSummaryRequest('<@U12345> tl;dr'));
+  assert.ok(isThreadSummaryRequest('TLDR'));
+});
+
+test('isThreadSummaryRequest ignores non-commands and unbounded input', () => {
+  assert.ok(!isThreadSummaryRequest('summarize this article'));
+  assert.ok(!isThreadSummaryRequest('that thread was wild'));
+  assert.ok(!isThreadSummaryRequest('the tldr of the movie is'));
+  assert.ok(!isThreadSummaryRequest(`summarize ${'x'.repeat(300)} thread`));
+  assert.ok(!isThreadSummaryRequest(''));
+  assert.ok(!isThreadSummaryRequest(undefined));
+});
+
 test('buildHelpText interpolates the bot name and lists key commands', () => {
   const help = buildHelpText('Data');
   assert.match(help, /@Data/);
@@ -116,6 +135,7 @@ test('buildHelpText interpolates the bot name and lists key commands', () => {
   assert.match(help, /\/forget/);
   assert.match(help, /the rules/);
   assert.match(help, /dad joke/);
+  assert.match(help, /summarize this thread/);
 });
 
 test('GENERIC_ERROR_TEXT is the single in-character error string', () => {

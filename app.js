@@ -13,6 +13,7 @@ dotenv.config({ quiet: true });
 import { buildDeps, validateRequiredEnv } from './lib/deps.js';
 import { handleMessage, clearHistory } from './lib/chat.js';
 import { generateImage } from './lib/image.js';
+import { summarizeThread } from './lib/summarize.js';
 import {
   ASIMOV_RULES,
   IMAGE_REQUEST_GUIDANCE,
@@ -31,6 +32,7 @@ import {
   isPodBayDoor,
   isRickroll,
   isTheRules,
+  isThreadSummaryRequest,
   isTikTok,
 } from './lib/responses.js';
 
@@ -184,19 +186,25 @@ export async function runChatTurn({ message, say, deps, errorLabel, streamFactor
       { chat, convoStore, ...(sink ? { onDelta: (delta) => sink.push(delta) } : {}) }
     );
     if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-    let posted = false;
-    if (sink && sink.active) {
-      // Reply content went through the stream. If handleMessage fell back to
-      // an apology (error or empty reply mid-stream), append it as a trailer
-      // so the partial message still ends coherently.
-      posted = await sink.finish(result.streamed ? undefined : `\n\n${result.text}`);
-    }
-    if (!posted) await say(result.text);
+    await deliverReply({ sink, result, say });
   } catch (error) {
     console.error(errorLabel, error);
     if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
     await say(GENERIC_ERROR_TEXT);
   }
+}
+
+// Land a { text, streamed } result in Slack. If reply content went through the
+// stream, finalize it — appending the text as a trailer when it's a fallback
+// (error/empty mid-stream) the stream never saw, so a partial message still
+// ends coherently. Otherwise (or if the stream never became visible) fall back
+// to a plain say().
+async function deliverReply({ sink, result, say }) {
+  let posted = false;
+  if (sink && sink.active) {
+    posted = await sink.finish(result.streamed ? undefined : `\n\n${result.text}`);
+  }
+  if (!posted) await say(result.text);
 }
 
 // Wire all the Bolt event listeners onto `deps.app`. Pure: takes deps, registers handlers.
@@ -282,7 +290,7 @@ export function registerHandlers(deps) {
     });
   });
 
-  app.message(directMention, async ({ message, say, sayStream }) => {
+  app.message(directMention, async ({ message, say, sayStream, client, context }) => {
     if (!message) return;
     // Slack tags messages with attached files as subtype 'file_share' — let
     // those through so vision uploads reach the LLM. All other subtypes
@@ -328,6 +336,33 @@ export function registerHandlers(deps) {
       } catch (error) {
         console.error(error);
         await sayInThread(`Encountered an error :( ${error}`);
+      }
+      return;
+    }
+
+    if (isThreadSummaryRequest(message.text)) {
+      const reacted = await addThinkingReaction(app, message.channel, message.ts);
+      const sink =
+        deps.streamReplies && sayStream
+          ? makeStreamSink(() => sayStream({ buffer_size: STREAM_BUFFER_SIZE }))
+          : null;
+      try {
+        const result = await summarizeThread({
+          client,
+          chat: deps.chat,
+          channel: message.channel,
+          threadTs,
+          triggerTs: message.ts,
+          botUserId: context.botUserId,
+          botName,
+          ...(sink ? { onDelta: (delta) => sink.push(delta) } : {}),
+        });
+        if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+        await deliverReply({ sink, result, say: sayInThread });
+      } catch (error) {
+        console.error('Error in thread summarization:', error);
+        if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
+        await sayInThread(GENERIC_ERROR_TEXT);
       }
       return;
     }

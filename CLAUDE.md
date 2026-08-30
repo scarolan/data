@@ -33,6 +33,7 @@ lib/
   responses.js             # Pure trigger-word matchers, help text, dad joke, Asimov rules
   chat.js                  # handleMessage — backend-agnostic, history in convoStore
   chat-backends.js         # makeOllamaChat() / makeGeminiChat() adapter factories
+  summarize.js             # summarizeThread — fetch + transcript + one-shot LLM briefing
   image.js                 # generateImage via Gemini (client + model injected)
   deps.js                  # buildDeps() factory, validateRequiredEnv()
 test/
@@ -154,6 +155,7 @@ Pattern matchers live in `lib/responses.js` as pure functions; the Bolt handlers
 - `"help"` (when @-mentioned) → command list
 - `"the rules"` (when @-mentioned) → Asimov's laws
 - `"dad joke"` (when @-mentioned) → fetched from icanhazdadjoke.com
+- `"summarize this thread"` / `"tl;dr"` (when @-mentioned) → LLM briefing of the current thread (`lib/summarize.js` — regex-triggered like the canned responses, but the reply itself is one LLM call; fetches via `conversations.replies`, resolves names via `users.info`, streams in-thread, bypasses convoStore)
 
 ## Testing
 
