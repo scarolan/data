@@ -204,6 +204,87 @@ test('handleMessage does not persist or post an empty reply', async () => {
   assert.deepStrictEqual(stored, [{ role: 'user', content: 'prior' }]);
 });
 
+// --- Streaming --------------------------------------------------------------
+
+// Fake adapter with both chat() and chatStream(); chatStream pushes the reply
+// through onDelta in two chunks (or throws mid-stream when told to).
+function makeFakeStreamingChat({ reply = 'streamed pong', failMidStream = false } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async chat({ messages }) {
+      calls.push({ via: 'chat', messages });
+      return { text: reply };
+    },
+    async chatStream({ messages, onDelta }) {
+      calls.push({ via: 'chatStream', messages });
+      const mid = Math.ceil(reply.length / 2);
+      await onDelta(reply.slice(0, mid));
+      if (failMidStream) throw new Error('stream died');
+      await onDelta(reply.slice(mid));
+      return { text: reply };
+    },
+  };
+}
+
+test('handleMessage streams via chatStream when onDelta is provided, and persists history', async () => {
+  const chat = makeFakeStreamingChat({ reply: 'streamed pong' });
+  const convoStore = makeFakeConvoStore();
+  const deltas = [];
+
+  const result = await handleMessage(
+    { text: 'hi', user: 'U1' },
+    { chat, convoStore, onDelta: async (d) => deltas.push(d) }
+  );
+
+  assert.strictEqual(result.text, 'streamed pong');
+  assert.strictEqual(result.streamed, true);
+  assert.strictEqual(deltas.join(''), 'streamed pong');
+  assert.strictEqual(chat.calls[0].via, 'chatStream');
+  const stored = await convoStore.get('convo:U1');
+  assert.deepStrictEqual(stored, [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'streamed pong' },
+  ]);
+});
+
+test('handleMessage uses plain chat() when no onDelta is given', async () => {
+  const chat = makeFakeStreamingChat();
+  const result = await handleMessage(
+    { text: 'hi', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore() }
+  );
+  assert.strictEqual(chat.calls[0].via, 'chat');
+  assert.strictEqual(result.streamed, false);
+});
+
+test('handleMessage uses plain chat() when the adapter has no chatStream', async () => {
+  const chat = makeFakeChat({ reply: 'pong' });
+  const result = await handleMessage(
+    { text: 'hi', user: 'U1' },
+    { chat, convoStore: makeFakeConvoStore(), onDelta: async () => {} }
+  );
+  assert.strictEqual(result.text, 'pong');
+  assert.strictEqual(result.streamed, false);
+});
+
+test('handleMessage reports streamed:false on a mid-stream error and does not persist', async () => {
+  const convoStore = makeFakeConvoStore({ 'convo:U1': [{ role: 'user', content: 'prior' }] });
+  const chat = makeFakeStreamingChat({ failMidStream: true });
+  const deltas = [];
+
+  const result = await handleMessage(
+    { text: 'hi', user: 'U1' },
+    { chat, convoStore, onDelta: async (d) => deltas.push(d) }
+  );
+
+  // Partial content flowed, but the returned apology was NOT streamed.
+  assert.strictEqual(deltas.length, 1);
+  assert.strictEqual(result.streamed, false);
+  assert.match(result.text, /neural pathways/);
+  assert.deepStrictEqual(await convoStore.get('convo:U1'), [{ role: 'user', content: 'prior' }]);
+});
+
 // --- clearHistory ---------------------------------------------------------
 
 test('clearHistory removes the stored history for a user', async () => {

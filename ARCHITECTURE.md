@@ -27,8 +27,8 @@ This document explains the high-level architecture of the `data` Slack chatbot: 
 
 1. Incoming message arrives via Bolt Socket Mode.
 2. The general message handler (`app.message(...)`) checks pure matchers from `lib/responses.js` in order (love-you → pod-bay → danceparty → tiktok → rickroll). On a match it calls `say()` with the helper output and returns.
-3. If no canned match and the channel is a DM or MPIM, the handler adds a `:brain:` reaction to the user's message, extracts any image attachments (`extractMessageImages`), calls `handleMessage(msg, { chat, convoStore })`, removes the reaction, and replies with the result.
-4. Direct-mention handler (`app.message(directMention, ...)`) checks for `help`, `the rules`, `dad joke`, and image-request guidance before falling through to `handleMessage()` with the same reaction UX. Channel @-mentions reply in-thread (continuing an existing thread or starting one rooted at the mention); DMs reply flat.
+3. If no canned match and the channel is a DM or MPIM, the handler adds a `:brain:` reaction to the user's message, extracts any image attachments (`extractMessageImages`), calls `handleMessage(msg, { chat, convoStore })`, removes the reaction, and replies with the result. Replies stream into Slack as they generate (`chat.startStream`/`appendStream`/`stopStream` behind `makeStreamSink`); if streaming is unavailable the sink falls back to a plain `say()`. `STREAM_REPLIES=false` disables streaming entirely.
+4. Direct-mention handler (`app.message(directMention, ...)`) checks for `help`, `the rules`, `dad joke`, and image-request guidance before falling through to `handleMessage()` with the same reaction UX and streaming behavior (via Bolt's `sayStream`, which targets the same thread). Channel @-mentions reply in-thread (continuing an existing thread or starting one rooted at the mention); DMs reply flat.
 5. Slash command `/image`:
    - `ack()` immediately to avoid Slack timeouts.
    - Respond with an ephemeral progress message.

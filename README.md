@@ -4,7 +4,7 @@
 
 ## Overview
 
-This is an AI-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to a language model for messages that don't match a predefined pattern. Chat is powered by **Ollama** (default, self-hosted) or **Gemini**; image generation uses **Gemini**. You can customize the bot's personality and responses to suit your needs.
+This is an AI-powered Slack chatbot built on the Bolt JS framework. The bot includes canned responses and falls back to a language model for messages that don't match a predefined pattern. Chat is powered by **Ollama** (default, self-hosted) or **Gemini**; image generation uses **Gemini**. Replies stream into Slack token-by-token as the model generates them (set `STREAM_REPLIES=false` to post whole replies instead). You can customize the bot's personality and responses to suit your needs.
 
 ## Prerequisites
 

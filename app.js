@@ -99,12 +99,64 @@ async function extractMessageImages(message, botToken) {
   return out;
 }
 
+// Wrap a lazily-created Slack ChatStreamer (client.chatStream / sayStream) so
+// the chat pipeline can push reply deltas at it without caring whether Slack
+// streaming actually works in this conversation. Degrades gracefully: any
+// failure before a message is visible makes finish() return false, telling the
+// caller to fall back to a plain say(). The streamer is only created on the
+// first delta, so a turn that errors out before producing text never opens a
+// stream.
+export function makeStreamSink(createStreamer) {
+  let streamer = null;
+  let broken = false;
+  let receivedAny = false;
+  return {
+    // True once at least one delta arrived — i.e. reply content exists that
+    // may be (partially) visible in a streamed Slack message.
+    get active() {
+      return receivedAny;
+    },
+    async push(delta) {
+      receivedAny = true;
+      if (broken) return;
+      try {
+        streamer = streamer || createStreamer();
+        await streamer.append({ markdown_text: delta });
+      } catch (err) {
+        broken = true;
+        console.warn(
+          'Streaming append failed; falling back to a plain reply:',
+          err?.message || err
+        );
+      }
+    },
+    // Finalize the stream; `trailer` (optional) is appended before stopping —
+    // used to tack an apology onto a partially-streamed reply. Returns true if
+    // a Slack message ended up posted via the stream, false if the caller
+    // should deliver the reply with say() instead.
+    async finish(trailer) {
+      if (!streamer) return false;
+      const visible = () => streamer.ts !== undefined;
+      if (broken && !visible()) return false;
+      try {
+        await streamer.stop(trailer ? { markdown_text: trailer } : undefined);
+        return true;
+      } catch (err) {
+        console.warn('Streaming stop failed:', err?.message || err);
+        return visible();
+      }
+    },
+  };
+}
+
 // Shared chat-turn pipeline for both the DM handler and the @-mention handler.
 // Runs the common pre-flight guards (empty message, edits, image-request nudge)
 // then the react → extract-images → handleMessage → reply sequence. The only
 // things that differ between the two call sites are `say` (flat for DMs,
-// in-thread for mentions) and the error-log label, so both are injected.
-export async function runChatTurn({ message, say, deps, errorLabel }) {
+// in-thread for mentions), the optional `streamFactory` (a () => ChatStreamer
+// used to stream the reply into Slack as it generates), and the error-log
+// label, so all three are injected.
+export async function runChatTurn({ message, say, deps, errorLabel, streamFactory }) {
   const { app, chat, convoStore, botToken } = deps;
 
   const hasText = message.text && message.text.trim() !== '';
@@ -120,9 +172,20 @@ export async function runChatTurn({ message, say, deps, errorLabel }) {
   const reacted = await addThinkingReaction(app, message.channel, message.ts);
   try {
     const images = await extractMessageImages(message, botToken);
-    const result = await handleMessage({ ...message, images }, { chat, convoStore });
+    const sink = streamFactory ? makeStreamSink(streamFactory) : null;
+    const result = await handleMessage(
+      { ...message, images },
+      { chat, convoStore, ...(sink ? { onDelta: (delta) => sink.push(delta) } : {}) }
+    );
     if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
-    await say(result.text);
+    let posted = false;
+    if (sink && sink.active) {
+      // Reply content went through the stream. If handleMessage fell back to
+      // an apology (error or empty reply mid-stream), append it as a trailer
+      // so the partial message still ends coherently.
+      posted = await sink.finish(result.streamed ? undefined : `\n\n${result.text}`);
+    }
+    if (!posted) await say(result.text);
   } catch (error) {
     console.error(errorLabel, error);
     if (reacted) await removeThinkingReaction(app, message.channel, message.ts);
@@ -136,7 +199,7 @@ export function registerHandlers(deps) {
   // directly by the handlers below.
   const { app, convoStore, geminiClient, geminiImageModel, botName, botToken } = deps;
 
-  app.message(async ({ message, say, context }) => {
+  app.message(async ({ message, say, client, context }) => {
     if (!message) {
       console.log('Received undefined message');
       return;
@@ -196,10 +259,20 @@ export function registerHandlers(deps) {
       say,
       deps,
       errorLabel: `Error in ${channelType} message processing:`,
+      // Stream the reply flat (no thread_ts) to keep DM replies unthreaded.
+      // If the workspace rejects flat streaming, the sink falls back to say().
+      streamFactory: deps.streamReplies
+        ? () =>
+            client.chatStream({
+              channel: message.channel,
+              recipient_team_id: context.teamId ?? context.enterpriseId,
+              recipient_user_id: context.userId,
+            })
+        : null,
     });
   });
 
-  app.message(directMention, async ({ message, say }) => {
+  app.message(directMention, async ({ message, say, sayStream }) => {
     if (!message) return;
     // Slack tags messages with attached files as subtype 'file_share' — let
     // those through so vision uploads reach the LLM. All other subtypes
@@ -254,6 +327,9 @@ export function registerHandlers(deps) {
       say: sayInThread,
       deps,
       errorLabel: 'Error in direct mention processing:',
+      // Bolt's sayStream targets thread_ts ?? ts — the same thread sayInThread
+      // replies into — so streamed and non-streamed replies land in one place.
+      streamFactory: deps.streamReplies && sayStream ? () => sayStream() : null,
     });
   });
 

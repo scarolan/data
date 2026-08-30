@@ -96,6 +96,81 @@ test('Ollama adapter translates images on the user turn to native base64 strings
   });
 });
 
+// --- Ollama streaming ------------------------------------------------------
+
+// Fake for the streaming path: `chat({stream: true})` resolves to an async
+// iterable of chunk objects, mirroring the ollama npm package.
+function makeFakeStreamingOllama(chunks) {
+  const calls = [];
+  return {
+    calls,
+    async chat(req) {
+      calls.push(req);
+      return (async function* () {
+        for (const c of chunks) yield { message: { role: 'assistant', content: c } };
+      })();
+    },
+  };
+}
+
+test('Ollama chatStream emits deltas via onDelta and returns the full text', async () => {
+  const ollama = makeFakeStreamingOllama(['Grea', 'tings, ', 'Captain.']);
+  const chat = makeOllamaChat({ model: 'gemma4', systemMessage: 'You are Data.', client: ollama });
+
+  const deltas = [];
+  const { text } = await chat.chatStream({
+    messages: [{ role: 'user', content: 'hi' }],
+    onDelta: async (d) => deltas.push(d),
+  });
+
+  assert.strictEqual(text, 'Greatings, Captain.');
+  assert.deepStrictEqual(deltas, ['Grea', 'tings, ', 'Captain.']);
+  assert.strictEqual(ollama.calls[0].stream, true);
+  assert.strictEqual(ollama.calls[0].think, false);
+  assert.deepStrictEqual(ollama.calls[0].messages, [
+    { role: 'system', content: 'You are Data.' },
+    { role: 'user', content: 'hi' },
+  ]);
+});
+
+test('Ollama chatStream strips tokenizer artifacts from deltas without trimming spaces', async () => {
+  const ollama = makeFakeStreamingOllama(['<|begin_of_text|>clean', ' me<|eot_id|>', '', ' ok']);
+  const chat = makeOllamaChat({ model: 'gemma4', client: ollama });
+
+  const deltas = [];
+  const { text } = await chat.chatStream({
+    messages: [{ role: 'user', content: 'hi' }],
+    onDelta: async (d) => deltas.push(d),
+  });
+
+  // Per-delta: tokens removed, internal whitespace preserved, empty deltas skipped.
+  assert.deepStrictEqual(deltas, ['clean', ' me', ' ok']);
+  // Full text gets the strict strip + trim.
+  assert.strictEqual(text, 'clean me ok');
+});
+
+test('Ollama chatStream propagates mid-stream errors after partial deltas', async () => {
+  const ollama = {
+    async chat() {
+      return (async function* () {
+        yield { message: { content: 'partial' } };
+        throw new Error('stream died');
+      })();
+    },
+  };
+  const chat = makeOllamaChat({ model: 'gemma4', client: ollama });
+  const deltas = [];
+  await assert.rejects(
+    () =>
+      chat.chatStream({
+        messages: [{ role: 'user', content: 'hi' }],
+        onDelta: async (d) => deltas.push(d),
+      }),
+    { message: 'stream died' }
+  );
+  assert.deepStrictEqual(deltas, ['partial']);
+});
+
 // --- Gemini --------------------------------------------------------------
 
 function makeFakeGeminiClient(replyOrFn) {
@@ -188,4 +263,39 @@ test('Gemini adapter accepts an image-only user turn (no text part)', async () =
   assert.deepStrictEqual(client.calls[0].contents[0].parts, [
     { inlineData: { mimeType: 'image/png', data: 'YWJj' } },
   ]);
+});
+
+// --- Gemini streaming ------------------------------------------------------
+
+test('Gemini chatStream emits deltas via onDelta and returns the full text', async () => {
+  const calls = [];
+  const client = {
+    models: {
+      async generateContentStream(req) {
+        calls.push(req);
+        return (async function* () {
+          yield { text: 'Grea' };
+          yield { text: '' }; // empty chunks are skipped
+          yield { text: 'tings.' };
+        })();
+      },
+    },
+  };
+  const chat = makeGeminiChat({
+    client,
+    model: 'gemini-3-flash-latest',
+    systemMessage: 'You are Data.',
+  });
+
+  const deltas = [];
+  const { text } = await chat.chatStream({
+    messages: [{ role: 'user', content: 'hi' }],
+    onDelta: async (d) => deltas.push(d),
+  });
+
+  assert.strictEqual(text, 'Greatings.');
+  assert.deepStrictEqual(deltas, ['Grea', 'tings.']);
+  assert.strictEqual(calls[0].model, 'gemini-3-flash-latest');
+  assert.deepStrictEqual(calls[0].config, { systemInstruction: 'You are Data.' });
+  assert.deepStrictEqual(calls[0].contents, [{ role: 'user', parts: [{ text: 'hi' }] }]);
 });

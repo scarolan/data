@@ -99,6 +99,7 @@ Loaded from `.env` via dotenv (see `.env.example`).
 - `OLLAMA_MODEL` — Ollama chat model (default: `gemma4:26b-a4b-it-qat`)
 - `GEMINI_CHAT_MODEL` — Gemini chat model (default: `gemini-3-flash-latest`)
 - `GEMINI_IMAGE_MODEL` — override the default image model (default: `gemini-3.1-flash-image`)
+- `STREAM_REPLIES` — stream replies into Slack as they generate (default: `true`; set `false` to post whole replies)
 - `BOT_PERSONALITY` — Custom system prompt
 - `REDIS_URL` — Redis connection (default: `redis://localhost:6379`)
 - `MEMORY_TTL_HOURS` — Conversation memory lifetime (default: 24)
@@ -129,6 +130,17 @@ While Data is thinking, the bot adds a `:brain:` reaction to the user's message 
 ## Thread-aware replies
 
 Channel @-mentions reply in-thread: if the mention is inside an existing thread, the reply continues that thread; otherwise a new thread is started rooted at the mention. Tool side effects (image uploads, joke posts) also land in-thread. DMs reply flat as before.
+
+## Streaming replies
+
+LLM replies stream into Slack token-by-token via `chat.startStream`/`appendStream`/`stopStream` (only needs `chat:write`; appendStream is rate-limit Tier 4 and the buffer flushes every ~256 chars). The plumbing:
+
+- Adapters in `lib/chat-backends.js` expose `chatStream({ messages, onDelta })` (Ollama `stream: true`, Gemini `generateContentStream`); `onDelta` is awaited per chunk so a slow Slack append backpressures the model stream. Both still resolve `{ text }` with the full reply, so history persistence in `handleMessage` is unchanged.
+- `handleMessage` accepts an optional `onDelta` and returns a `streamed` flag: true means the full reply already went through `onDelta`; false means the returned text is a fallback (error/empty) that has NOT reached the stream.
+- `app.js::makeStreamSink` wraps a lazily-created ChatStreamer with graceful degradation: if streaming fails before a message is visible, `runChatTurn` falls back to plain `say()`; if the backend dies mid-stream, the apology is appended as a trailer to the partial message. A turn that errors before producing text never opens a stream.
+- Channel @-mentions use Bolt's `sayStream` (streams into the same thread `sayInThread` targets). DMs/MPIMs call `client.chatStream` **without** `thread_ts` to keep replies flat — Slack docs mark `thread_ts` optional; if the workspace rejects flat streaming the sink falls back to `say()` automatically (watch the logs for `Streaming append failed` after deploying).
+- Kill switch: `STREAM_REPLIES=false` restores whole-message replies.
+- `setStatus` (assistant loading states) is deliberately not used — it's the Assistant-surface API and the `:brain:` reaction already covers "I'm thinking" (see Reactions UX).
 
 ## Canned Responses
 

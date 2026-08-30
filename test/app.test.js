@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 
-import { runChatTurn } from '../app.js';
+import { runChatTurn, makeStreamSink } from '../app.js';
 
 // Importing app.js MUST be safe with no env set and no Slack/Redis available.
 // If validateRequiredEnv or the IIFE ever sneaks back in unguarded, this fails.
@@ -175,4 +175,141 @@ test('runChatTurn falls back to the generic error text and clears the reaction w
   assert.match(say.calls[1], /neural pathways/);
   // Reaction removed once in the try (before the throwing say) and again in the catch.
   assert.strictEqual(deps.app.removed.length, 2);
+});
+
+// --- Streaming --------------------------------------------------------------
+
+// Quacks like @slack/web-api's ChatStreamer: append/stop plus a `ts` that is
+// undefined until the first successful flush.
+function makeFakeStreamer({ appendThrows = false, stopThrows = false } = {}) {
+  const streamer = {
+    appends: [],
+    stops: [],
+    ts: undefined,
+    async append(args) {
+      if (appendThrows) throw new Error('append failed');
+      streamer.appends.push(args);
+      streamer.ts = streamer.ts || '999.111';
+    },
+    async stop(args) {
+      if (stopThrows) throw new Error('stop failed');
+      streamer.stops.push(args ?? null);
+      streamer.ts = streamer.ts || '999.111';
+    },
+  };
+  return streamer;
+}
+
+// Adapter fake with a chatStream that pushes the reply in two chunks, and
+// optionally dies mid-stream.
+function makeFakeStreamingChat({ reply = 'Affirmative.', failMidStream = false } = {}) {
+  return {
+    async chat() {
+      return { text: reply };
+    },
+    async chatStream({ onDelta }) {
+      const mid = Math.ceil(reply.length / 2);
+      await onDelta(reply.slice(0, mid));
+      if (failMidStream) throw new Error('stream died');
+      await onDelta(reply.slice(mid));
+      return { text: reply };
+    },
+  };
+}
+
+test('runChatTurn streams the reply and does not double-post via say', async () => {
+  const streamer = makeFakeStreamer();
+  const deps = makeDeps({ chat: makeFakeStreamingChat({ reply: 'Affirmative.' }) });
+  const say = makeSay();
+
+  await runChatTurn({
+    message: { ...baseMessage },
+    say,
+    deps,
+    errorLabel: 'test:',
+    streamFactory: () => streamer,
+  });
+
+  assert.strictEqual(say.calls.length, 0);
+  assert.deepStrictEqual(streamer.appends.map((a) => a.markdown_text).join(''), 'Affirmative.');
+  assert.strictEqual(streamer.stops.length, 1);
+  // Reaction UX still applies around the streamed turn.
+  assert.strictEqual(deps.app.added.length, 1);
+  assert.strictEqual(deps.app.removed.length, 1);
+});
+
+test('runChatTurn falls back to say() when streaming fails before anything is visible', async () => {
+  const streamer = makeFakeStreamer({ appendThrows: true });
+  const deps = makeDeps({ chat: makeFakeStreamingChat({ reply: 'Affirmative.' }) });
+  const say = makeSay();
+
+  await runChatTurn({
+    message: { ...baseMessage },
+    say,
+    deps,
+    errorLabel: 'test:',
+    streamFactory: () => streamer,
+  });
+
+  assert.deepStrictEqual(say.calls, ['Affirmative.']);
+  assert.strictEqual(streamer.stops.length, 0);
+});
+
+test('runChatTurn appends the apology as a trailer when the backend dies mid-stream', async () => {
+  const streamer = makeFakeStreamer();
+  const deps = makeDeps({ chat: makeFakeStreamingChat({ failMidStream: true }) });
+  const say = makeSay();
+
+  await runChatTurn({
+    message: { ...baseMessage },
+    say,
+    deps,
+    errorLabel: 'test:',
+    streamFactory: () => streamer,
+  });
+
+  // Partial content is finalized with the apology appended — no separate say().
+  assert.strictEqual(say.calls.length, 0);
+  assert.strictEqual(streamer.stops.length, 1);
+  assert.match(streamer.stops[0].markdown_text, /neural pathways/);
+});
+
+test('runChatTurn with a non-streaming adapter never opens a stream', async () => {
+  const streamer = makeFakeStreamer();
+  const deps = makeDeps(); // makeFakeChat: chat() only
+  const say = makeSay();
+
+  await runChatTurn({
+    message: { ...baseMessage },
+    say,
+    deps,
+    errorLabel: 'test:',
+    streamFactory: () => streamer,
+  });
+
+  assert.deepStrictEqual(say.calls, ['Affirmative.']);
+  assert.strictEqual(streamer.appends.length, 0);
+  assert.strictEqual(streamer.stops.length, 0);
+});
+
+// --- makeStreamSink ---------------------------------------------------------
+
+test('makeStreamSink creates the streamer lazily and reports inactive with no deltas', async () => {
+  let created = 0;
+  const sink = makeStreamSink(() => {
+    created += 1;
+    return makeFakeStreamer();
+  });
+  assert.strictEqual(sink.active, false);
+  assert.strictEqual(await sink.finish(), false);
+  assert.strictEqual(created, 0);
+});
+
+test('makeStreamSink reports posted when stop fails after content is visible', async () => {
+  const streamer = makeFakeStreamer({ stopThrows: true });
+  const sink = makeStreamSink(() => streamer);
+  await sink.push('some content');
+  // ts is set (message visible), so a failed stop still counts as posted —
+  // returning false here would make the caller double-post via say().
+  assert.strictEqual(await sink.finish(), true);
 });
