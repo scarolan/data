@@ -1,0 +1,49 @@
+pipeline:
+  id: pipeline_scarolan_data_build_1417
+  name: pipeline_scarolan_data_build_1417
+  stages:
+    - id: ci
+      name: CI
+      clone:
+        enabled: true
+      runtime: cloud
+      platform:
+        os: linux
+        arch: amd64
+      cache:
+        enabled: true
+      steps:
+        - name: Install Dependencies
+          id: install_dependencies
+          run:
+            container:
+              image: node:22-alpine
+            shell: sh
+            script: |-
+              node --version
+              npm --version
+              npm ci
+        - name: Lint
+          id: lint
+          run:
+            container:
+              image: node:22-alpine
+            shell: sh
+            script: npm run lint
+        - name: Run Tests
+          id: run_tests
+          run-test:
+            container:
+              image: node:22-alpine
+            shell: sh
+            script: |-
+              mkdir -p .harness/reports
+              node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=.harness/reports/junit.xml
+            intelligence:
+              disabled: true
+            report:
+              type: junit
+              paths:
+                - .harness/reports/junit.xml
+  tags:
+    onboarding: "true"
