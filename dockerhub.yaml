@@ -1,0 +1,17 @@
+accountIdentifier: MmFlOTM0MmQtYTIxOC00Nz
+description: null
+identifier: dockerhub_public
+name: Docker Hub - Public
+orgIdentifier: acme_corp
+projectIdentifier: null
+spec:
+  auth:
+    type: Anonymous
+  delegateSelectors: []
+  dockerRegistryUrl: https://index.docker.io/v2/
+  executeOnDelegate: false
+  ignoreTestConnection: false
+  providerType: DockerHub
+  proxy: false
+tags: {}
+type: DockerRegistry

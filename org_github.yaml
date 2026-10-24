@@ -1,0 +1,28 @@
+accountIdentifier: MmFlOTM0MmQtYTIxOC00Nz
+description: null
+identifier: github
+name: GitHub
+orgIdentifier: acme_corp
+projectIdentifier: null
+spec:
+  apiAccess:
+    spec:
+      tokenRef: org.github_pat
+    type: Token
+  authentication:
+    spec:
+      spec:
+        tokenRef: org.github_pat
+        username: scarolan
+        usernameRef: null
+      type: UsernameToken
+    type: Http
+  delegateSelectors: []
+  executeOnDelegate: false
+  ignoreTestConnection: false
+  proxy: false
+  type: Account
+  url: https://github.com
+  validationRepo: scarolan/harness-doom
+tags: {}
+type: Github

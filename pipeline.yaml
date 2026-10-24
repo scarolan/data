@@ -1,0 +1,46 @@
+pipeline:
+  name: data-ci
+  identifier: data_ci
+  projectIdentifier: web_apps
+  orgIdentifier: acme_corp
+  tags: {}
+  properties:
+    ci:
+      codebase:
+        connectorRef: org.github
+        repoName: scarolan/data
+        build:
+          type: branch
+          spec:
+            branch: main
+  stages:
+    - stage:
+        name: ci
+        identifier: ci
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Run Tests and Upload Coverage
+                  identifier: Run_Tests_and_Upload_Coverage
+                  spec:
+                    connectorRef: org.dockerhub_public
+                    image: node:22-alpine
+                    shell: Sh
+                    command: |-
+                      apk add --no-cache git
+                      npm ci
+                      node --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=lcov.info --test
+                      hcli cov upload
+                    envVariables:
+                      CI_ENABLE_HCLI_FOR_TESTS: "true"
+                  timeout: 10m
